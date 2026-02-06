@@ -64,13 +64,81 @@ impl SessionDetector {
         // Find all running Claude processes
         let claude_processes = self.find_claude_processes();
 
+        // If no Claude processes are running, return empty
+        if claude_processes.is_empty() {
+            return Ok(Vec::new());
+        }
+
         // Get all session project directories
         let project_dirs = self.enumerate_project_directories()?;
 
-        // Match processes to sessions
-        let sessions = self.match_processes_to_sessions(claude_processes, project_dirs);
+        // Find recently active sessions (modified in last 30 minutes)
+        // and associate them with running processes
+        let sessions = self.find_active_sessions(&claude_processes, &project_dirs);
 
         Ok(sessions)
+    }
+
+    /// Find sessions that are likely active based on recent modification
+    fn find_active_sessions(
+        &self,
+        processes: &[ClaudeProcess],
+        project_dirs: &[PathBuf],
+    ) -> Vec<DetectedSession> {
+        let mut sessions = Vec::new();
+        let now = std::time::SystemTime::now();
+        let thirty_mins_ago = now - std::time::Duration::from_secs(30 * 60);
+
+        for project_dir in project_dirs {
+            let index_path = project_dir.join("sessions-index.json");
+
+            if let Ok(content) = fs::read_to_string(&index_path) {
+                if let Ok(index) = serde_json::from_str::<SessionsIndex>(&content) {
+                    if let Some(entries) = &index.entries {
+                        for entry in entries {
+                            // Check if session file was recently modified
+                            if let Some(full_path) = &entry.full_path {
+                                let session_path = PathBuf::from(full_path);
+                                if let Ok(metadata) = fs::metadata(&session_path) {
+                                    if let Ok(modified) = metadata.modified() {
+                                        if modified > thirty_mins_ago {
+                                            // This is a recently active session
+                                            let project_path = entry.project_path
+                                                .as_ref()
+                                                .map(PathBuf::from)
+                                                .unwrap_or_else(|| project_dir.clone());
+
+                                            let project_name = project_path
+                                                .file_name()
+                                                .and_then(|n| n.to_str())
+                                                .unwrap_or("unknown")
+                                                .to_string();
+
+                                            // Assign a process (round-robin if multiple)
+                                            let pid = if !processes.is_empty() {
+                                                processes[sessions.len() % processes.len()].pid
+                                            } else {
+                                                0
+                                            };
+
+                                            sessions.push(DetectedSession {
+                                                pid,
+                                                cwd: project_path.clone(),
+                                                project_path: project_dir.clone(),
+                                                session_id: Some(entry.session_id.clone()),
+                                                project_name,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        sessions
     }
 
     /// Finds all processes with name "claude"
@@ -166,8 +234,13 @@ impl SessionDetector {
 
             if let Ok(content) = fs::read_to_string(&index_path) {
                 if let Ok(index) = serde_json::from_str::<SessionsIndex>(&content) {
-                    if let Some(cwd) = index.cwd {
-                        map.insert(PathBuf::from(cwd), project_path.clone());
+                    // Get project path from the first entry
+                    if let Some(entries) = &index.entries {
+                        if let Some(first_entry) = entries.first() {
+                            if let Some(proj_path) = &first_entry.project_path {
+                                map.insert(PathBuf::from(proj_path), project_path.clone());
+                            }
+                        }
                     }
                 }
             }
@@ -203,19 +276,19 @@ impl SessionDetector {
 
         if let Ok(content) = fs::read_to_string(&index_path) {
             if let Ok(index) = serde_json::from_str::<SessionsIndex>(&content) {
-                if let Some(sessions) = &index.sessions {
+                if let Some(entries) = &index.entries {
                     // Find sessions that match this cwd
-                    for session in sessions {
-                        if let Some(session_cwd) = &session.cwd {
-                            if PathBuf::from(session_cwd) == cwd {
-                                return Some(session.id.clone());
+                    for entry in entries {
+                        if let Some(project_path_str) = &entry.project_path {
+                            if PathBuf::from(project_path_str) == cwd {
+                                return Some(entry.session_id.clone());
                             }
                         }
                     }
 
                     // If no exact match, return the most recent session
-                    if let Some(latest) = sessions.first() {
-                        return Some(latest.id.clone());
+                    if let Some(latest) = entries.first() {
+                        return Some(latest.session_id.clone());
                     }
                 }
             }
@@ -240,15 +313,23 @@ struct ClaudeProcess {
 
 /// Structure of sessions-index.json
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SessionsIndex {
-    cwd: Option<String>,
-    sessions: Option<Vec<SessionInfo>>,
+    version: Option<u32>,
+    entries: Option<Vec<SessionEntry>>,
 }
 
 #[derive(Debug, Deserialize)]
-struct SessionInfo {
-    id: String,
-    cwd: Option<String>,
+#[serde(rename_all = "camelCase")]
+struct SessionEntry {
+    session_id: String,
+    project_path: Option<String>,
+    full_path: Option<String>,
+    first_prompt: Option<String>,
+    summary: Option<String>,
+    message_count: Option<u32>,
+    git_branch: Option<String>,
+    modified: Option<String>,
 }
 
 #[cfg(test)]
