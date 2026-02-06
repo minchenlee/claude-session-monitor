@@ -81,24 +81,14 @@ pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
             }
         };
 
-        // Parse sessions-index.json to get basic info
+        // Try to parse sessions-index.json to get basic info (optional)
         let index_path = detected.project_path.join("sessions-index.json");
-        let sessions_index = match parse_sessions_index(&index_path) {
-            Ok(index) => index,
-            Err(e) => {
-                eprintln!(
-                    "Failed to parse sessions-index.json for session {}: {}",
-                    session_id, e
-                );
-                continue;
-            }
-        };
+        let sessions_index = parse_sessions_index(&index_path).ok();
 
-        // Find the matching entry in the index
+        // Find the matching entry in the index (if index exists)
         let session_entry = sessions_index
-            .entries
-            .iter()
-            .find(|entry| entry.session_id == session_id);
+            .as_ref()
+            .and_then(|index| index.entries.iter().find(|entry| entry.session_id == session_id));
 
         let (first_prompt, message_count, modified, git_branch) = match session_entry {
             Some(entry) => (
@@ -108,7 +98,7 @@ pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
                 Some(entry.git_branch.clone()),
             ),
             None => {
-                // Session not in index yet (still running) - use fallback values
+                // Session not in index or index doesn't exist - use fallback values
                 let session_file_path = detected.project_path.join(format!("{}.jsonl", session_id));
 
                 // Try to get first prompt from JSONL file
