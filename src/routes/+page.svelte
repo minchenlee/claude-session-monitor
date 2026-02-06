@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { selectedSessionId, sessions } from '$lib/stores/sessions';
+	import { selectedSessionId, sessions, currentConversation } from '$lib/stores/sessions';
 	import { getConversation, sendPrompt, stopSession, openSession } from '$lib/api';
 	import SessionList from '$lib/components/SessionList.svelte';
 	import ConversationView from '$lib/components/ConversationView.svelte';
@@ -16,9 +16,16 @@
 	// Fetch conversation when a session is selected
 	$effect(() => {
 		if (currentSessionId) {
-			getConversation(currentSessionId).catch((error) => {
-				console.error('Failed to fetch conversation:', error);
-			});
+			getConversation(currentSessionId)
+				.then((conversation) => {
+					currentConversation.set(conversation);
+				})
+				.catch((error) => {
+					console.error('Failed to fetch conversation:', error);
+					currentConversation.set(null);
+				});
+		} else {
+			currentConversation.set(null);
 		}
 	});
 

@@ -45,42 +45,22 @@ export interface Session {
 }
 
 /**
- * Message role in conversation
+ * Message type in conversation
  */
-export type MessageRole = 'user' | 'assistant';
-
-/**
- * Tool call information
- */
-export interface ToolCall {
-  /** Name of the tool being called */
-  name: string;
-
-  /** Input parameters to the tool */
-  input: Record<string, unknown>;
-
-  /** Output from the tool (if completed) */
-  output?: string;
-
-  /** Whether the tool call has been completed */
-  completed: boolean;
-}
+export type MessageType = 'User' | 'Assistant' | 'Thinking' | 'ToolUse' | 'ToolResult';
 
 /**
  * A message in a conversation
  */
 export interface Message {
-  /** Message role (user or assistant) */
-  role: MessageRole;
-
-  /** Message content text */
-  content: string;
-
   /** Message timestamp (ISO 8601 string) */
   timestamp: string;
 
-  /** Tool calls associated with this message (if any) */
-  toolCalls?: ToolCall[];
+  /** Message type */
+  messageType: MessageType;
+
+  /** Message content text */
+  content: string;
 }
 
 /**

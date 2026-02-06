@@ -57,7 +57,14 @@ async fn get_conversation(session_id: String) -> Result<Conversation, String> {
             if has_session {
                 // Found the project - parse the session file
                 let session_file = project_path.join(format!("{}.jsonl", session_id));
-                let entries = parse_last_n_entries(&session_file, 100)?;
+
+                if !session_file.exists() {
+                    return Err(format!("Session file does not exist: {:?}", session_file));
+                }
+
+                let entries = parse_last_n_entries(&session_file, 100)
+                    .map_err(|e| format!("Failed to parse session file: {}", e))?;
+
                 let messages = extract_messages(&entries);
 
                 // Convert to frontend format
@@ -78,7 +85,7 @@ async fn get_conversation(session_id: String) -> Result<Conversation, String> {
         }
     }
 
-    Err(format!("Session {} not found", session_id))
+    Err(format!("Session {} not found in any project directory", session_id))
 }
 
 /// Send a prompt to a session

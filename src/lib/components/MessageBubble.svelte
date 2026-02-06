@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type { Message } from '$lib/types';
-	import ToolCallBlock from './ToolCallBlock.svelte';
 
 	interface Props {
 		message: Message;
@@ -16,24 +15,47 @@
 			minute: '2-digit'
 		});
 	}
+
+	// Determine if this is a user message
+	let isUser = $derived(message.messageType === 'User');
+	let isAssistant = $derived(message.messageType === 'Assistant');
+	let isThinking = $derived(message.messageType === 'Thinking');
+	let isToolUse = $derived(message.messageType === 'ToolUse');
+	let isToolResult = $derived(message.messageType === 'ToolResult');
+
+	// Get display label for message type
+	let roleLabel = $derived.by(() => {
+		switch (message.messageType) {
+			case 'User':
+				return 'You';
+			case 'Assistant':
+				return 'Claude';
+			case 'Thinking':
+				return 'Claude (Thinking)';
+			case 'ToolUse':
+				return 'Tool Use';
+			case 'ToolResult':
+				return 'Tool Result';
+			default:
+				return 'Unknown';
+		}
+	});
 </script>
 
-<div class="message-bubble" class:user={message.role === 'user'} class:assistant={message.role === 'assistant'}>
+<div
+	class="message-bubble"
+	class:user={isUser}
+	class:assistant={isAssistant}
+	class:thinking={isThinking}
+	class:tool={isToolUse || isToolResult}
+>
 	<div class="message-header">
-		<span class="message-role">{message.role === 'user' ? 'You' : 'Claude'}</span>
+		<span class="message-role">{roleLabel}</span>
 		<span class="message-time">{formatTime(message.timestamp)}</span>
 	</div>
 
 	{#if message.content}
 		<div class="message-content">{message.content}</div>
-	{/if}
-
-	{#if message.toolCalls && message.toolCalls.length > 0}
-		<div class="tool-calls">
-			{#each message.toolCalls as toolCall}
-				<ToolCallBlock {toolCall} />
-			{/each}
-		</div>
 	{/if}
 </div>
 
@@ -55,6 +77,21 @@
 		background: #f3f4f6;
 		border: 1px solid #e5e7eb;
 		margin-right: auto;
+	}
+
+	.message-bubble.thinking {
+		background: #fef3c7;
+		border: 1px solid #fde68a;
+		margin-right: auto;
+	}
+
+	.message-bubble.tool {
+		background: #f0fdf4;
+		border: 1px solid #d1fae5;
+		margin-right: auto;
+		font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New',
+			monospace;
+		font-size: 13px;
 	}
 
 	.message-header {
