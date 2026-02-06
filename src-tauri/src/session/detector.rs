@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use sysinfo::{ProcessesToUpdate, System};
@@ -200,12 +199,9 @@ impl SessionDetector {
             let name = process.name().to_string_lossy();
 
             if name.contains("claude") && !name.contains("claude-session-monitor") {
-                if let Some(cwd) = process.cwd() {
-                    processes.push(ClaudeProcess {
-                        pid: pid.as_u32(),
-                        cwd: cwd.to_path_buf(),
-                    });
-                }
+                processes.push(ClaudeProcess {
+                    pid: pid.as_u32(),
+                });
             }
         }
 
@@ -237,115 +233,6 @@ impl SessionDetector {
         Ok(project_dirs)
     }
 
-    /// Matches Claude processes to their corresponding session directories
-    fn match_processes_to_sessions(
-        &self,
-        processes: Vec<ClaudeProcess>,
-        project_dirs: Vec<PathBuf>,
-    ) -> Vec<DetectedSession> {
-        let mut sessions = Vec::new();
-
-        // Create a map of project directories for faster lookup
-        let project_map = self.build_project_map(&project_dirs);
-
-        for process in processes {
-            // Try to match this process to a project directory
-            if let Some(project_path) = self.find_matching_project(&process.cwd, &project_map) {
-                // Extract project name from cwd
-                let project_name = process.cwd
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-
-                // Try to find session ID from the project path
-                let session_id = self.find_session_id_for_cwd(&project_path, &process.cwd);
-
-                sessions.push(DetectedSession {
-                    pid: process.pid,
-                    cwd: process.cwd.clone(),
-                    project_path: project_path.clone(),
-                    session_id,
-                    project_name,
-                });
-            }
-        }
-
-        sessions
-    }
-
-    /// Builds a map of working directories to project paths
-    fn build_project_map(&self, project_dirs: &[PathBuf]) -> HashMap<PathBuf, PathBuf> {
-        let mut map = HashMap::new();
-
-        for project_path in project_dirs {
-            // Read the sessions-index.json to find the working directory
-            let index_path = project_path.join("sessions-index.json");
-
-            if let Ok(content) = fs::read_to_string(&index_path) {
-                if let Ok(index) = serde_json::from_str::<SessionsIndex>(&content) {
-                    // Get project path from the first entry
-                    if let Some(entries) = &index.entries {
-                        if let Some(first_entry) = entries.first() {
-                            if let Some(proj_path) = &first_entry.project_path {
-                                map.insert(PathBuf::from(proj_path), project_path.clone());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        map
-    }
-
-    /// Finds the project directory that matches the given working directory
-    fn find_matching_project(
-        &self,
-        cwd: &Path,
-        project_map: &HashMap<PathBuf, PathBuf>,
-    ) -> Option<PathBuf> {
-        // Direct match
-        if let Some(project_path) = project_map.get(cwd) {
-            return Some(project_path.clone());
-        }
-
-        // Check if cwd is a subdirectory of any project's cwd
-        for (project_cwd, project_path) in project_map {
-            if cwd.starts_with(project_cwd) {
-                return Some(project_path.clone());
-            }
-        }
-
-        None
-    }
-
-    /// Finds the session ID for a given working directory
-    fn find_session_id_for_cwd(&self, project_path: &Path, cwd: &Path) -> Option<String> {
-        let index_path = project_path.join("sessions-index.json");
-
-        if let Ok(content) = fs::read_to_string(&index_path) {
-            if let Ok(index) = serde_json::from_str::<SessionsIndex>(&content) {
-                if let Some(entries) = &index.entries {
-                    // Find sessions that match this cwd
-                    for entry in entries {
-                        if let Some(project_path_str) = &entry.project_path {
-                            if PathBuf::from(project_path_str) == cwd {
-                                return Some(entry.session_id.clone());
-                            }
-                        }
-                    }
-
-                    // If no exact match, return the most recent session
-                    if let Some(latest) = entries.first() {
-                        return Some(latest.session_id.clone());
-                    }
-                }
-            }
-        }
-
-        None
-    }
 }
 
 impl Default for SessionDetector {
@@ -358,13 +245,13 @@ impl Default for SessionDetector {
 #[derive(Debug)]
 struct ClaudeProcess {
     pid: u32,
-    cwd: PathBuf,
 }
 
 /// Structure of sessions-index.json
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SessionsIndex {
+    #[allow(dead_code)]
     version: Option<u32>,
     entries: Option<Vec<SessionEntry>>,
 }
@@ -374,11 +261,17 @@ struct SessionsIndex {
 struct SessionEntry {
     session_id: String,
     project_path: Option<String>,
+    #[allow(dead_code)]
     full_path: Option<String>,
+    #[allow(dead_code)]
     first_prompt: Option<String>,
+    #[allow(dead_code)]
     summary: Option<String>,
+    #[allow(dead_code)]
     message_count: Option<u32>,
+    #[allow(dead_code)]
     git_branch: Option<String>,
+    #[allow(dead_code)]
     modified: Option<String>,
 }
 
