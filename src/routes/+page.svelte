@@ -1,156 +1,263 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+	import { selectedSessionId, sessions } from '$lib/stores/sessions';
+	import { getConversation, sendPrompt, stopSession, openSession } from '$lib/api';
+	import SessionList from '$lib/components/SessionList.svelte';
+	import ConversationView from '$lib/components/ConversationView.svelte';
+	import PromptInput from '$lib/components/PromptInput.svelte';
 
-  let name = $state("");
-  let greetMsg = $state("");
+	let currentSessionId = $derived($selectedSessionId);
+	let currentSessions = $derived($sessions);
 
-  async function greet(event: Event) {
-    event.preventDefault();
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    greetMsg = await invoke("greet", { name });
-  }
+	// Get selected session details
+	let selectedSession = $derived(
+		currentSessions.find((s) => s.id === currentSessionId) || null
+	);
+
+	// Fetch conversation when a session is selected
+	$effect(() => {
+		if (currentSessionId) {
+			getConversation(currentSessionId).catch((error) => {
+				console.error('Failed to fetch conversation:', error);
+			});
+		}
+	});
+
+	async function handleSendPrompt(prompt: string) {
+		if (!currentSessionId) return;
+
+		try {
+			await sendPrompt(currentSessionId, prompt);
+		} catch (error) {
+			console.error('Failed to send prompt:', error);
+		}
+	}
+
+	async function handleStop() {
+		if (!currentSessionId) return;
+
+		try {
+			await stopSession(currentSessionId);
+		} catch (error) {
+			console.error('Failed to stop session:', error);
+		}
+	}
+
+	async function handleOpen() {
+		if (!currentSessionId) return;
+
+		try {
+			await openSession(currentSessionId);
+		} catch (error) {
+			console.error('Failed to open session:', error);
+		}
+	}
 </script>
 
-<main class="container">
-  <h1>Welcome to Tauri + Svelte</h1>
+<div class="app-container">
+	<!-- Left Panel: Session List -->
+	<aside class="sidebar">
+		<SessionList />
+	</aside>
 
-  <div class="row">
-    <a href="https://vite.dev" target="_blank">
-      <img src="/vite.svg" class="logo vite" alt="Vite Logo" />
-    </a>
-    <a href="https://tauri.app" target="_blank">
-      <img src="/tauri.svg" class="logo tauri" alt="Tauri Logo" />
-    </a>
-    <a href="https://svelte.dev" target="_blank">
-      <img src="/svelte.svg" class="logo svelte-kit" alt="SvelteKit Logo" />
-    </a>
-  </div>
-  <p>Click on the Tauri, Vite, and SvelteKit logos to learn more.</p>
+	<!-- Right Panel: Conversation and Input -->
+	<main class="main-panel">
+		<!-- Conversation Header -->
+		{#if selectedSession}
+			<div class="conversation-header">
+				<div class="project-info">
+					<h1 class="project-name">
+						{selectedSession.projectName}
+						{#if selectedSession.gitBranch}
+							<span class="git-branch">({selectedSession.gitBranch})</span>
+						{/if}
+					</h1>
+					<p class="project-path">{selectedSession.projectPath}</p>
+				</div>
+			</div>
+		{/if}
 
-  <form class="row" onsubmit={greet}>
-    <input id="greet-input" placeholder="Enter a name..." bind:value={name} />
-    <button type="submit">Greet</button>
-  </form>
-  <p>{greetMsg}</p>
-</main>
+		<!-- Conversation View -->
+		<div class="conversation-container">
+			<ConversationView />
+		</div>
+
+		<!-- Bottom Action Bar -->
+		<div class="action-bar">
+			<div class="action-buttons">
+				<button
+					class="action-button stop-button"
+					onclick={handleStop}
+					disabled={!currentSessionId}
+					type="button"
+				>
+					<svg
+						width="16"
+						height="16"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					>
+						<rect x="6" y="6" width="12" height="12"></rect>
+					</svg>
+					Stop
+				</button>
+				<button
+					class="action-button open-button"
+					onclick={handleOpen}
+					disabled={!currentSessionId}
+					type="button"
+				>
+					<svg
+						width="16"
+						height="16"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					>
+						<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+						<polyline points="15 3 21 3 21 9"></polyline>
+						<line x1="10" y1="14" x2="21" y2="3"></line>
+					</svg>
+					Open
+				</button>
+			</div>
+
+			<div class="prompt-container">
+				<PromptInput onsend={handleSendPrompt} />
+			</div>
+		</div>
+	</main>
+</div>
 
 <style>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
+	.app-container {
+		display: flex;
+		height: 100vh;
+		width: 100vw;
+		overflow: hidden;
+		background: #fafafa;
+	}
 
-.logo.svelte-kit:hover {
-  filter: drop-shadow(0 0 2em #ff3e00);
-}
+	.sidebar {
+		width: 300px;
+		min-width: 250px;
+		max-width: 400px;
+		border-right: 1px solid #e5e7eb;
+		background: #fafafa;
+		display: flex;
+		flex-direction: column;
+	}
 
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
+	.main-panel {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		background: white;
+	}
 
-  color: #0f0f0f;
-  background-color: #f6f6f6;
+	.conversation-header {
+		padding: 20px 24px;
+		border-bottom: 1px solid #e5e7eb;
+		background: white;
+	}
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
+	.project-info {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
 
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
+	.project-name {
+		margin: 0;
+		font-size: 20px;
+		font-weight: 600;
+		color: #111827;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
+	.git-branch {
+		font-size: 14px;
+		font-weight: 500;
+		color: #6b7280;
+	}
 
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
+	.project-path {
+		margin: 0;
+		font-size: 13px;
+		color: #6b7280;
+		font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New',
+			monospace;
+	}
 
-.row {
-  display: flex;
-  justify-content: center;
-}
+	.conversation-container {
+		flex: 1;
+		min-height: 0;
+		overflow: hidden;
+	}
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
+	.action-bar {
+		display: flex;
+		gap: 16px;
+		padding: 0;
+		border-top: 1px solid #e5e7eb;
+		background: white;
+	}
 
-a:hover {
-  color: #535bf2;
-}
+	.action-buttons {
+		display: flex;
+		gap: 8px;
+		padding: 16px 20px;
+		border-right: 1px solid #e5e7eb;
+	}
 
-h1 {
-  text-align: center;
-}
+	.action-button {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 8px 16px;
+		font-size: 14px;
+		font-weight: 500;
+		border: 1px solid #d1d5db;
+		border-radius: 6px;
+		background: white;
+		color: #374151;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
 
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
+	.action-button:hover:not(:disabled) {
+		background: #f9fafb;
+		border-color: #9ca3af;
+	}
 
-button {
-  cursor: pointer;
-}
+	.action-button:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
 
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
+	.stop-button:hover:not(:disabled) {
+		background: #fee2e2;
+		border-color: #fca5a5;
+		color: #dc2626;
+	}
 
-input,
-button {
-  outline: none;
-}
+	.open-button:hover:not(:disabled) {
+		background: #dbeafe;
+		border-color: #93c5fd;
+		color: #2563eb;
+	}
 
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
-
-  a:hover {
-    color: #24c8db;
-  }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-}
-
+	.prompt-container {
+		flex: 1;
+		min-width: 0;
+	}
 </style>

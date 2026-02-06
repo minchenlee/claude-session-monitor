@@ -1,0 +1,176 @@
+/**
+ * Global styles for Claude Session Monitor
+ */
+
+/* CSS Reset and Base Styles */
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+html,
+body {
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	padding: 0;
+	overflow: hidden;
+}
+
+body {
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial,
+		sans-serif;
+	font-size: 14px;
+	line-height: 1.5;
+	color: #111827;
+	background-color: #ffffff;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+/* Typography */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+	font-weight: 600;
+	line-height: 1.2;
+}
+
+p {
+	margin: 0;
+}
+
+/* Code and Monospace */
+code,
+pre,
+kbd,
+samp {
+	font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New',
+		monospace;
+	font-size: 0.9em;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+::-webkit-scrollbar-track {
+	background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+	background: #d1d5db;
+	border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: #9ca3af;
+}
+
+/* Selection */
+::selection {
+	background-color: #bfdbfe;
+	color: #1e40af;
+}
+
+::-moz-selection {
+	background-color: #bfdbfe;
+	color: #1e40af;
+}
+
+/* Focus Styles */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+	outline: 2px solid #3b82f6;
+	outline-offset: 2px;
+}
+
+/* Button Reset */
+button {
+	font-family: inherit;
+	font-size: inherit;
+	line-height: inherit;
+	border: none;
+	background: none;
+	cursor: pointer;
+	color: inherit;
+}
+
+/* Input Reset */
+input,
+textarea,
+select {
+	font-family: inherit;
+	font-size: inherit;
+	line-height: inherit;
+	color: inherit;
+}
+
+/* Link Reset */
+a {
+	color: #3b82f6;
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+/* Utility Classes */
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border-width: 0;
+}
+
+/* Animation */
+@keyframes fadeIn {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes slideIn {
+	from {
+		transform: translateY(10px);
+		opacity: 0;
+	}
+	to {
+		transform: translateY(0);
+		opacity: 1;
+	}
+}
+
+.fade-in {
+	animation: fadeIn 0.2s ease-in;
+}
+
+.slide-in {
+	animation: slideIn 0.3s ease-out;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+	body {
+		font-size: 13px;
+	}
+}
