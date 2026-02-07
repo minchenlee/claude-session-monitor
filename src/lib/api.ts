@@ -50,3 +50,13 @@ export async function stopSession(pid: number): Promise<void> {
 export async function openSession(pid: number, projectPath: string): Promise<void> {
   await invoke<void>('open_session', { pid, projectPath });
 }
+
+/**
+ * Approve a permission request by sending 'y' + Enter to the terminal
+ * @param pid - The process ID of the Claude session
+ * @param projectPath - The project path for window matching
+ * @returns Promise resolving when the approval has been sent
+ */
+export async function approveSession(pid: number, projectPath: string): Promise<void> {
+  await invoke<void>('approve_session', { pid, projectPath });
+}

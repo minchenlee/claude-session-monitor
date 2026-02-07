@@ -17,33 +17,41 @@ pub fn open_session(pid: u32, project_path: String) -> Result<(), String> {
 
     eprintln!("[open_session] App: {}, Project: {}, Path: {}", app_name, project_name, project_path);
 
-    // For Zed, use the CLI to open/focus the project window
-    if app_name == "Zed" {
-        let zed_cli = "/Applications/Zed.app/Contents/MacOS/cli";
+    // Try to use app-specific CLI to open/focus the correct window
+    if let Some(cli_path) = get_app_cli(&app_name) {
+        eprintln!("[open_session] Using CLI: {} to open: {}", cli_path, project_path);
 
-        eprintln!("[open_session] Using Zed CLI to open: {}", project_path);
-
-        let output = Command::new(zed_cli)
-            .arg(&project_path)
-            .output();
+        // VS Code family uses -r flag to reuse window, -g to not open new if exists
+        let output = if app_name == "Visual Studio Code" || app_name == "Cursor" || app_name == "Windsurf" {
+            Command::new(&cli_path)
+                .arg("-r")  // Reuse existing window
+                .arg("-g")  // Don't grab focus for new file (but we want focus)
+                .arg(&project_path)
+                .output()
+        } else {
+            // Zed and others just take the path
+            Command::new(&cli_path)
+                .arg(&project_path)
+                .output()
+        };
 
         match output {
             Ok(out) => {
                 if out.status.success() {
-                    eprintln!("[open_session] Zed CLI succeeded");
+                    eprintln!("[open_session] CLI succeeded");
                     return Ok(());
                 } else {
                     let error = String::from_utf8_lossy(&out.stderr);
-                    eprintln!("[open_session] Zed CLI error: {}", error);
+                    eprintln!("[open_session] CLI error: {}", error);
                 }
             }
             Err(e) => {
-                eprintln!("[open_session] Failed to run Zed CLI: {}", e);
+                eprintln!("[open_session] Failed to run CLI: {}", e);
             }
         }
     }
 
-    // Fallback for other apps or if Zed CLI fails: just activate the app
+    // Fallback: just activate the app
     let script = format!(r#"tell application "{}" to activate"#, app_name);
 
     let output = Command::new("osascript")
@@ -58,6 +66,38 @@ pub fn open_session(pid: u32, project_path: String) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Get the CLI path for an application if available
+fn get_app_cli(app_name: &str) -> Option<String> {
+    let cli_paths: &[(&str, &[&str])] = &[
+        ("Zed", &["/Applications/Zed.app/Contents/MacOS/cli"]),
+        ("Visual Studio Code", &[
+            "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+            "/usr/local/bin/code",
+        ]),
+        ("Cursor", &[
+            "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+            "/Applications/Cursor.app/Contents/Resources/app/bin/code",
+            "/usr/local/bin/cursor",
+        ]),
+        ("Windsurf", &[
+            "/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf",
+            "/Applications/Windsurf.app/Contents/Resources/app/bin/code",
+        ]),
+    ];
+
+    for (name, paths) in cli_paths {
+        if *name == app_name {
+            for path in *paths {
+                if std::path::Path::new(path).exists() {
+                    return Some(path.to_string());
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Find the parent GUI application for a given process ID
@@ -185,23 +225,135 @@ fn get_app_name(comm: &str) -> Option<&'static str> {
     }
 }
 
-/// Stop a session by sending SIGINT to the process
+/// Approve a permission request by sending 'y' + Enter to the terminal
 ///
-/// This gracefully terminates the Claude process by sending a SIGINT signal,
-/// which is equivalent to pressing Ctrl+C.
+/// This function:
+/// 1. Finds the parent terminal/IDE application
+/// 2. Activates the window
+/// 3. Sends 'y' keystroke followed by Enter to approve
+pub fn approve_session(pid: u32, project_path: String) -> Result<(), String> {
+    let app_name = find_parent_app(pid)?;
+
+    eprintln!("[approve_session] App: {}, PID: {}", app_name, pid);
+
+    // First, focus the correct window
+    open_session(pid, project_path)?;
+
+    // Small delay to ensure window is focused
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // Send 'y' + Enter keystroke using AppleScript
+    // Different apps need different approaches
+    let script = match app_name.as_str() {
+        "Terminal" => {
+            // Terminal.app - use System Events to send keystrokes
+            r#"
+            tell application "System Events"
+                tell process "Terminal"
+                    keystroke "y"
+                    keystroke return
+                end tell
+            end tell
+            "#.to_string()
+        }
+        "iTerm" | "iTerm2" => {
+            // iTerm2 - use its native write command
+            r#"
+            tell application "iTerm"
+                tell current session of current window
+                    write text "y"
+                end tell
+            end tell
+            "#.to_string()
+        }
+        "Warp" => {
+            // Warp terminal
+            r#"
+            tell application "System Events"
+                tell process "Warp"
+                    keystroke "y"
+                    keystroke return
+                end tell
+            end tell
+            "#.to_string()
+        }
+        "Alacritty" | "kitty" | "Hyper" => {
+            // These terminals don't have great AppleScript support
+            // Fall back to System Events
+            format!(r#"
+            tell application "System Events"
+                tell process "{}"
+                    keystroke "y"
+                    keystroke return
+                end tell
+            end tell
+            "#, app_name)
+        }
+        // IDEs with integrated terminals
+        "Zed" | "Visual Studio Code" | "Cursor" | "Windsurf" => {
+            // For IDEs, we use System Events to send keystrokes
+            // The integrated terminal should receive them when focused
+            format!(r#"
+            tell application "System Events"
+                tell process "{}"
+                    keystroke "y"
+                    keystroke return
+                end tell
+            end tell
+            "#, app_name)
+        }
+        _ => {
+            // Generic fallback using System Events
+            format!(r#"
+            tell application "System Events"
+                tell process "{}"
+                    keystroke "y"
+                    keystroke return
+                end tell
+            end tell
+            "#, app_name)
+        }
+    };
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to execute osascript: {}", e))?;
+
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr);
+        eprintln!("[approve_session] AppleScript error: {}", error);
+        return Err(format!("Failed to send keystroke: {}", error));
+    }
+
+    eprintln!("[approve_session] Keystroke sent successfully");
+    Ok(())
+}
+
+/// Stop a session by sending SIGTERM to the process
+///
+/// This gracefully terminates the Claude process by sending a SIGTERM signal.
+/// SIGTERM is preferred over SIGINT as Claude Code may trap SIGINT for its own use.
 pub fn stop_session(pid: u32) -> Result<(), String> {
-    // Use the kill command to send SIGINT (signal 2)
+    eprintln!("[stop_session] Stopping PID: {}", pid);
+
+    // First try SIGTERM (signal 15) - graceful termination
     let output = Command::new("kill")
-        .arg("-2") // SIGINT
+        .arg("-15") // SIGTERM
         .arg(pid.to_string())
         .output()
         .map_err(|e| format!("Failed to execute kill command: {}", e))?;
 
     if !output.status.success() {
         let error = String::from_utf8_lossy(&output.stderr);
+        eprintln!("[stop_session] SIGTERM failed: {}", error);
+
+        // If SIGTERM fails, the process might not exist or we don't have permission
         return Err(format!("Failed to stop process {}: {}", pid, error));
     }
 
+    eprintln!("[stop_session] SIGTERM sent successfully");
     Ok(())
 }
 
@@ -236,7 +388,11 @@ pub fn send_prompt(session_id: String, prompt: String) -> Result<(), String> {
         return Err("Failed to open stdin for claude process".to_string());
     }
 
-    // Don't wait for the process to complete - it will run in the background
+    // Spawn a thread to reap the child process to avoid zombies
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+
     Ok(())
 }
 
@@ -255,7 +411,7 @@ mod tests {
     #[ignore] // This test requires manual verification
     fn test_open_session() {
         // Use current process PID for testing
-        let result = open_session(std::process::id());
+        let result = open_session(std::process::id(), "/tmp".to_string());
         println!("Result: {:?}", result);
     }
 

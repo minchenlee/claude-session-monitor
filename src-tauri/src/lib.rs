@@ -2,13 +2,14 @@ pub mod actions;
 pub mod polling;
 pub mod session;
 
-use actions::{open_session as open_session_action, send_prompt as send_prompt_action, stop_session as stop_session_action};
-use polling::{start_polling, Session};
+use actions::{approve_session as approve_session_action, open_session as open_session_action, send_prompt as send_prompt_action, stop_session as stop_session_action};
+use polling::{detect_and_enrich_sessions, start_polling, Session};
 use session::{extract_messages, parse_last_n_entries, MessageType};
 use serde::Serialize;
+use std::time::Duration;
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    AppHandle, Emitter, Manager,
 };
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -80,14 +81,61 @@ async fn send_prompt(session_id: String, prompt: String) -> Result<(), String> {
 
 /// Stop a session by process ID
 #[tauri::command]
-async fn stop_session(pid: u32) -> Result<(), String> {
-    stop_session_action(pid)
+async fn stop_session(app: AppHandle, pid: u32) -> Result<(), String> {
+    // Stop the session
+    stop_session_action(pid)?;
+
+    // Wait a brief moment for the process to terminate
+    std::thread::sleep(Duration::from_millis(300));
+
+    // Emit updated sessions immediately so UI reflects the change
+    if let Ok(sessions) = detect_and_enrich_sessions() {
+        let _ = app.emit("sessions-updated", &sessions);
+    }
+
+    Ok(())
 }
 
 /// Open a session in its parent application
 #[tauri::command]
 async fn open_session(pid: u32, project_path: String) -> Result<(), String> {
     open_session_action(pid, project_path)
+}
+
+/// Approve a permission request by sending keystrokes to the terminal
+#[tauri::command]
+async fn approve_session(pid: u32, project_path: String) -> Result<(), String> {
+    approve_session_action(pid, project_path)
+}
+
+/// Rename a session
+#[tauri::command]
+async fn rename_session(app: AppHandle, session_id: String, new_name: String) -> Result<(), String> {
+    let mut custom_names = session::CustomNames::load();
+    custom_names.set(session_id, new_name);
+    custom_names.save()?;
+
+    // Emit updated sessions immediately
+    if let Ok(sessions) = detect_and_enrich_sessions() {
+        let _ = app.emit("sessions-updated", &sessions);
+    }
+
+    Ok(())
+}
+
+/// Show and focus the main application window
+#[tauri::command]
+async fn show_main_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+
+        // Hide the popover if it's open
+        if let Some(popover) = app.get_webview_window("popover") {
+            let _ = popover.hide();
+        }
+    }
+    Ok(())
 }
 
 /// Conversation structure for the frontend
@@ -128,14 +176,10 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        // Toggle window visibility on left click
+                        // Show/focus main window on tray click
                         if let Some(window) = app_handle.get_webview_window("main") {
-                            if window.is_visible().unwrap_or(false) {
-                                let _ = window.hide();
-                            } else {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
+                            let _ = window.show();
+                            let _ = window.set_focus();
                         }
                     }
                 })
@@ -149,7 +193,10 @@ pub fn run() {
             get_conversation,
             send_prompt,
             stop_session,
-            open_session
+            open_session,
+            approve_session,
+            rename_session,
+            show_main_window
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
