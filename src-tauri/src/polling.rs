@@ -67,6 +67,7 @@ pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
         .detect_sessions()
         .map_err(|e| format!("Failed to detect sessions: {}", e))?;
 
+    let custom_names = crate::session::CustomNames::load();
     let mut sessions = Vec::new();
     let mut seen_ids: HashSet<String> = HashSet::new();
 
@@ -139,10 +140,22 @@ pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
             }
         };
 
+        // Skip empty sessions (0 messages) - these are likely sessions where user
+        // immediately used /resume to switch to a different session
+        if message_count == 0 {
+            continue;
+        }
+
+        // Use custom name if available, otherwise use detected project name
+        let project_name = custom_names
+            .get(&session_id)
+            .cloned()
+            .unwrap_or(detected.project_name);
+
         sessions.push(Session {
             id: session_id,
             pid: detected.pid,
-            project_name: detected.project_name,
+            project_name,
             project_path: detected.cwd.to_string_lossy().to_string(),
             git_branch,
             first_prompt,
@@ -191,12 +204,14 @@ fn get_first_prompt_from_jsonl(path: &Path) -> Option<String> {
     None
 }
 
-/// Truncate a string to a maximum length
-fn truncate_string(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+/// Truncate a string to a maximum length (character-safe for UTF-8)
+fn truncate_string(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count <= max_chars {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len])
+        let truncated: String = s.chars().take(max_chars).collect();
+        format!("{}...", truncated)
     }
 }
 

@@ -84,8 +84,9 @@ impl SessionDetector {
         processes: &[ClaudeProcess],
         project_dirs: &[PathBuf],
     ) -> Vec<DetectedSession> {
-        // Collect all session files with their modification times
-        let mut session_files: Vec<(std::time::SystemTime, PathBuf, PathBuf)> = Vec::new();
+        // Collect all session files with their modification times and project path
+        // Tuple: (modified_time, jsonl_path, project_dir, project_path, project_name, has_reliable_path)
+        let mut session_files: Vec<(std::time::SystemTime, PathBuf, PathBuf, PathBuf, String, bool)> = Vec::new();
 
         for project_dir in project_dirs {
             if let Ok(entries) = fs::read_dir(project_dir) {
@@ -105,7 +106,42 @@ impl SessionDetector {
 
                         if let Ok(metadata) = fs::metadata(&path) {
                             if let Ok(modified) = metadata.modified() {
-                                session_files.push((modified, path, project_dir.clone()));
+                                // Get session ID and project info
+                                if let Some(session_id) = path.file_stem()
+                                    .and_then(|s| s.to_str())
+                                    .map(|s| s.to_string())
+                                {
+                                    // Try to get project info from sessions-index.json
+                                    // This is the ONLY reliable source of project path
+                                    let (project_path, project_name, has_reliable_path) =
+                                        match self.get_project_info_from_index(project_dir, &session_id) {
+                                            Some((path, name)) => (path, name, true),
+                                            None => {
+                                                // No reliable path available - use directory name as display only
+                                                // Don't try to decode it (decoding is ambiguous due to dashes)
+                                                let dir_name = project_dir
+                                                    .file_name()
+                                                    .and_then(|n| n.to_str())
+                                                    .unwrap_or("unknown");
+
+                                                // Just use the last segment after splitting on dash as a rough name
+                                                // This is for display only, not for matching
+                                                let name = dir_name.rsplit('-').next().unwrap_or("unknown").to_string();
+
+                                                // Use the project_dir as a placeholder (will use fallback PID assignment)
+                                                (project_dir.clone(), name, false)
+                                            }
+                                        };
+
+                                    session_files.push((
+                                        modified,
+                                        path,
+                                        project_dir.clone(),
+                                        project_path,
+                                        project_name,
+                                        has_reliable_path,
+                                    ));
+                                }
                             }
                         }
                     }
@@ -116,42 +152,72 @@ impl SessionDetector {
         // Sort by modification time (most recent first)
         session_files.sort_by(|a, b| b.0.cmp(&a.0));
 
-        // Take only as many sessions as there are running processes
-        let num_to_take = processes.len().max(1);
+        // Process-centric approach: for each process, find its matching session
+        // This ensures we only show sessions that have actual running processes
         let mut sessions = Vec::new();
+        let mut used_session_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        for (_, path, project_dir) in session_files.into_iter().take(num_to_take) {
-            if let Some(session_id) = path.file_stem()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_string())
-            {
-                // Try to get project info from sessions-index.json
-                let (project_path, project_name) = self
-                    .get_project_info_from_index(&project_dir, &session_id)
-                    .unwrap_or_else(|| {
-                        // Fallback: derive from project directory name
-                        let name = project_dir
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("unknown")
-                            .to_string();
-                        (project_dir.clone(), name)
-                    });
+        // Sort processes by start_time (newest first) to match newest processes first
+        let mut sorted_processes: Vec<&ClaudeProcess> = processes.iter().collect();
+        sorted_processes.sort_by(|a, b| b.start_time.cmp(&a.start_time));
 
-                // Assign a process (round-robin if multiple)
-                let pid = if !processes.is_empty() {
-                    processes[sessions.len() % processes.len()].pid
+        for proc in sorted_processes {
+            let proc_cwd = match &proc.cwd {
+                Some(cwd) => cwd,
+                None => continue, // Skip processes without cwd
+            };
+
+            // Encode the process cwd for matching
+            let cwd_str = proc_cwd.to_string_lossy();
+            let encoded_cwd = cwd_str.replace('/', "-").replace('_', "-");
+
+            // Find the best matching session for this process
+            // (most recently modified session that matches this process's cwd and isn't already used)
+            let matching_session = session_files.iter().find(|(_, path, project_dir, project_path, _, has_reliable_path)| {
+                // Get session ID and check if already used
+                let session_id = match path.file_stem().and_then(|s| s.to_str()) {
+                    Some(id) => id,
+                    None => return false,
+                };
+                if used_session_ids.contains(session_id) {
+                    return false;
+                }
+
+                let dir_name = project_dir
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+
+                // Method 1: Direct path comparison
+                let direct_match = if *has_reliable_path {
+                    proc_cwd == project_path
+                        || proc_cwd.starts_with(project_path)
+                        || project_path.starts_with(proc_cwd)
                 } else {
-                    0
+                    false
                 };
 
-                sessions.push(DetectedSession {
-                    pid,
-                    cwd: project_path.clone(),
-                    project_path: project_dir.clone(),
-                    session_id: Some(session_id),
-                    project_name,
-                });
+                // Method 2: Encoded path comparison
+                let encoded_match = dir_name == encoded_cwd;
+
+                direct_match || encoded_match
+            });
+
+            if let Some((_, path, project_dir, _, project_name, _)) = matching_session {
+                if let Some(session_id) = path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string())
+                {
+                    used_session_ids.insert(session_id.clone());
+
+                    sessions.push(DetectedSession {
+                        pid: proc.pid,
+                        cwd: proc_cwd.clone(),
+                        project_path: project_dir.clone(),
+                        session_id: Some(session_id),
+                        project_name: project_name.clone(),
+                    });
+                }
             }
         }
 
@@ -211,8 +277,14 @@ impl SessionDetector {
             let name = process.name().to_string_lossy();
 
             if name.contains("claude") && !name.contains("claude-session-monitor") {
+                // Get the current working directory of the process
+                let cwd = process.cwd().map(|p| p.to_path_buf());
+                let start_time = process.start_time();
+
                 processes.push(ClaudeProcess {
                     pid: pid.as_u32(),
+                    cwd,
+                    start_time,
                 });
             }
         }
@@ -254,9 +326,11 @@ impl Default for SessionDetector {
 }
 
 /// Internal representation of a Claude process
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ClaudeProcess {
     pid: u32,
+    cwd: Option<PathBuf>,
+    start_time: u64, // Process start time (seconds since epoch)
 }
 
 /// Structure of sessions-index.json
