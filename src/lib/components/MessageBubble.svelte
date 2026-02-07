@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type { Message } from '$lib/types';
+	import { marked } from 'marked';
+	import DOMPurify from 'dompurify';
 
 	interface Props {
 		message: Message;
@@ -54,6 +56,38 @@
 				return '•';
 		}
 	});
+
+	let renderedContent = $derived.by(() => {
+		if (!message.content) return '';
+
+		const renderer = new marked.Renderer();
+
+		// Custom code block renderer for Vercel Noir style
+		renderer.code = function ({ text, lang }) {
+			const language = lang || 'code';
+			return `
+				<div class="code-block-wrapper">
+					<div class="code-header">
+						<span class="code-lang">${language}</span>
+						<div class="code-actions">
+							<span class="code-dot"></span>
+							<span class="code-dot"></span>
+						</div>
+					</div>
+					<pre><code class="language-${language}">${text}</code></pre>
+				</div>
+			`;
+		};
+
+		// Configure marked for safe rendering
+		const rawHtml = marked.parse(message.content, {
+			async: false,
+			breaks: true,
+			gfm: true,
+			renderer
+		});
+		return DOMPurify.sanitize(rawHtml as string);
+	});
 </script>
 
 <div
@@ -71,7 +105,13 @@
 	</div>
 
 	{#if message.content}
-		<div class="message-content">{message.content}</div>
+		<div class="message-content">
+			{#if isAssistant || isUser}
+				{@html renderedContent}
+			{:else}
+				{message.content}
+			{/if}
+		</div>
 	{/if}
 </div>
 
@@ -79,41 +119,39 @@
 	.message-bubble {
 		margin: var(--space-sm) 0;
 		padding: var(--space-md) var(--space-lg);
-		border-radius: var(--radius-md);
-		max-width: 90%;
-		border-left: 3px solid transparent;
+		max-width: 100%;
+		border-left: 1px solid var(--border-default);
+		transition: background var(--transition-fast);
+	}
+
+	.message-bubble:hover {
+		background: rgba(255, 255, 255, 0.02);
 	}
 
 	.message-bubble.user {
-		background: rgba(88, 166, 255, 0.1);
-		border-left-color: var(--accent-blue);
-		margin-left: auto;
+		border-left: 2px solid var(--text-primary);
+		background: rgba(255, 255, 255, 0.01);
 	}
 
 	.message-bubble.assistant {
-		background: var(--bg-card);
 		border-left-color: var(--text-muted);
 	}
 
 	.message-bubble.thinking {
-		background: rgba(240, 136, 62, 0.1);
-		border-left-color: var(--accent-amber);
-		font-style: italic;
+		border-left: 1px dashed var(--status-permission);
+		background: rgba(255, 102, 0, 0.03);
+		opacity: 0.8;
 	}
 
 	.message-bubble.tool-use {
-		background: rgba(63, 185, 80, 0.08);
-		border-left-color: var(--accent-green);
-		font-family: var(--font-mono);
-		font-size: 12px;
+		border-left: 1px solid var(--status-input);
+		background: rgba(0, 255, 136, 0.02);
 	}
 
 	.message-bubble.tool-result {
-		background: var(--bg-card);
 		border-left-color: var(--text-muted);
-		font-family: var(--font-mono);
-		font-size: 12px;
-		opacity: 0.8;
+		background: rgba(255, 255, 255, 0.01);
+		opacity: 0.6;
 	}
 
 	.message-header {
@@ -124,49 +162,198 @@
 	}
 
 	.message-icon {
-		font-size: 12px;
-		opacity: 0.6;
+		font-family: var(--font-mono);
+		font-size: 10px;
+		color: var(--text-muted);
 	}
 
 	.message-role {
-		font-weight: 600;
-		font-size: 12px;
-		color: var(--text-secondary);
+		font-family: var(--font-mono);
+		font-weight: 500;
+		font-size: 10px;
+		color: var(--text-muted);
 		text-transform: uppercase;
-		letter-spacing: 0.5px;
+		letter-spacing: 0.1em;
 	}
 
 	.message-bubble.user .message-role {
-		color: var(--accent-blue);
+		color: var(--text-primary);
 	}
 
 	.message-bubble.thinking .message-role {
-		color: var(--accent-amber);
+		color: var(--status-permission);
 	}
 
 	.message-bubble.tool-use .message-role {
-		color: var(--accent-green);
+		color: var(--status-input);
 	}
 
 	.message-time {
 		margin-left: auto;
-		font-size: 11px;
+		font-size: 10px;
 		color: var(--text-muted);
 		font-family: var(--font-mono);
+		letter-spacing: 0.05em;
 	}
 
 	.message-content {
-		color: var(--text-primary);
-		font-size: 14px;
+		color: var(--text-secondary);
+		font-size: 13px;
 		line-height: 1.6;
-		white-space: pre-wrap;
+		white-space: normal;
 		word-wrap: break-word;
+	}
+
+	.message-content :global(p) {
+		margin: 0 0 var(--space-md) 0;
+	}
+
+	.message-content :global(p:last-child) {
+		margin-bottom: 0;
+	}
+
+	.message-content :global(h1),
+	.message-content :global(h2),
+	.message-content :global(h3),
+	.message-content :global(h4) {
+		color: var(--text-primary);
+		font-weight: 600;
+		margin: var(--space-lg) 0 var(--space-sm) 0;
+		line-height: 1.2;
+	}
+
+	.message-content :global(h1) { font-size: 16px; }
+	.message-content :global(h2) { font-size: 15px; }
+	.message-content :global(h3) { font-size: 14px; }
+	.message-content :global(h4) { font-size: 13px; }
+
+	.message-content :global(.code-block-wrapper) {
+		margin: var(--space-md) 0;
+		border: 1px solid var(--border-default);
+		background: var(--bg-elevated);
+	}
+
+	.message-content :global(.code-header) {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: var(--space-xs) var(--space-md);
+		border-bottom: 1px solid var(--border-muted);
+		background: var(--bg-card);
+	}
+
+	.message-content :global(.code-lang) {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+	}
+
+	.message-content :global(.code-actions) {
+		display: flex;
+		gap: 4px;
+	}
+
+	.message-content :global(.code-dot) {
+		width: 4px;
+		height: 4px;
+		background: var(--border-default);
+	}
+
+	.message-content :global(pre) {
+		margin: 0;
+		padding: var(--space-md);
+		overflow-x: auto;
+		background: transparent;
+	}
+
+	.message-content :global(code) {
+		font-family: var(--font-mono);
+		font-size: 12px;
+		background: var(--bg-elevated);
+		padding: 2px 4px;
+		color: var(--text-primary);
+	}
+
+	.message-content :global(pre code) {
+		padding: 0;
+		background: transparent;
+		display: block;
+		line-height: 1.5;
+		white-space: pre;
+	}
+
+	.message-content :global(ul),
+	.message-content :global(ol) {
+		margin: 0 0 var(--space-md) var(--space-lg);
+		padding: 0;
+	}
+
+	.message-content :global(li) {
+		margin-bottom: var(--space-xs);
+		padding-left: 4px;
+	}
+
+	.message-content :global(li::marker) {
+		color: var(--text-muted);
+		font-family: var(--font-mono);
+		font-size: 11px;
+	}
+
+	.message-content :global(blockquote) {
+		margin: var(--space-md) 0;
+		padding: var(--space-sm) var(--space-md);
+		border-left: 2px solid var(--border-default);
+		background: var(--bg-elevated);
+		color: var(--text-secondary);
+		font-style: italic;
+	}
+
+	.message-content :global(hr) {
+		border: 0;
+		border-top: 1px solid var(--border-muted);
+		margin: var(--space-lg) 0;
+	}
+
+	.message-content :global(strong),
+	.message-content :global(b) {
+		font-weight: 600;
+		color: var(--text-primary);
+	}
+
+	.message-content :global(em),
+	.message-content :global(i) {
+		font-style: italic;
+		color: var(--text-primary);
+	}
+
+	.message-content :global(a) {
+		color: var(--status-input);
+		text-decoration: underline;
+		text-underline-offset: 2px;
+		transition: color var(--transition-fast);
+	}
+
+	.message-content :global(a:hover) {
+		color: var(--text-primary);
+	}
+
+	.message-bubble.user .message-content {
+		color: var(--text-primary);
 	}
 
 	.message-bubble.tool-use .message-content,
 	.message-bubble.tool-result .message-content {
-		color: var(--text-secondary);
-		max-height: 200px;
+		color: var(--text-muted);
+		max-height: 250px;
 		overflow-y: auto;
+		white-space: pre-wrap;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		background: var(--bg-elevated);
+		padding: var(--space-sm);
+		border: 1px solid var(--border-muted);
 	}
 </style>
+

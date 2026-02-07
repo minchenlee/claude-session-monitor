@@ -3,18 +3,80 @@
 		sortedSessions,
 		expandedSessionId,
 		currentConversation,
-		attentionCount
+		statusSummary
 	} from '$lib/stores/sessions';
-	import { getConversation, sendPrompt, stopSession, openSession } from '$lib/api';
-	import DashboardHeader from '$lib/components/DashboardHeader.svelte';
+	import { getConversation, sendPrompt, stopSession, openSession, approveSession } from '$lib/api';
+	import StatusBar from '$lib/components/StatusBar.svelte';
 	import SessionCard from '$lib/components/SessionCard.svelte';
 	import ExpandedCardOverlay from '$lib/components/ExpandedCardOverlay.svelte';
 	import type { Session } from '$lib/types';
+	import { SessionStatus } from '$lib/types';
 
 	let sessions = $derived($sortedSessions);
+	let summary = $derived($statusSummary);
 	let expandedId = $derived($expandedSessionId);
 	let conversation = $derived($currentConversation);
-	let attention = $derived($attentionCount);
+
+	// Helper function to group sessions by project path, then by status
+	function groupByProjectAndStatus(sessions: Session[]) {
+		const groups: Array<{
+			path: string;
+			displayName: string;
+			attention: Session[];
+			idle: Session[];
+			working: Session[];
+			connecting: Session[];
+			lastModified: number;
+		}> = [];
+
+		sessions.forEach(session => {
+			let group = groups.find(g => g.path === session.projectPath);
+			if (!group) {
+				const parts = session.projectPath.split(/[/\\]/);
+				const folderName = parts.filter(Boolean).pop() || session.projectPath;
+				group = {
+					path: session.projectPath,
+					displayName: folderName,
+					attention: [],
+					idle: [],
+					working: [],
+					connecting: [],
+					lastModified: 0
+				};
+				groups.push(group);
+			}
+
+			const modified = new Date(session.modified).getTime();
+			if (modified > group.lastModified) {
+				group.lastModified = modified;
+			}
+
+			if (session.status === SessionStatus.NeedsPermission) {
+				group.attention.push(session);
+			} else if (session.status === SessionStatus.WaitingForInput) {
+				group.idle.push(session);
+			} else if (session.status === SessionStatus.Working) {
+				group.working.push(session);
+			} else if (session.status === SessionStatus.Connecting) {
+				group.connecting.push(session);
+			}
+		});
+
+		// Sort groups: priority to those needing attention, then by modification time
+		return groups.sort((a, b) => {
+			const aNeedsAttention = a.attention.length > 0;
+			const bNeedsAttention = b.attention.length > 0;
+			if (aNeedsAttention !== bNeedsAttention) return aNeedsAttention ? -1 : 1;
+
+			const aNeedsIdle = a.idle.length > 0;
+			const bNeedsIdle = b.idle.length > 0;
+			if (aNeedsIdle !== bNeedsIdle) return aNeedsIdle ? -1 : 1;
+
+			return b.lastModified - a.lastModified;
+		});
+	}
+
+	let projectGroups = $derived(groupByProjectAndStatus(sessions));
 
 	let expandedSession = $derived(sessions.find((s) => s.id === expandedId) || null);
 
@@ -41,9 +103,9 @@
 		expandedSessionId.set(null);
 	}
 
-	async function handleApprove(sessionId: string) {
+	async function handleApprove(session: Session) {
 		try {
-			await sendPrompt(sessionId, 'y');
+			await approveSession(session.pid, session.projectPath);
 		} catch (error) {
 			console.error('Failed to approve:', error);
 		}
@@ -80,13 +142,15 @@
 				handleExpand(sessions[index]);
 			}
 		}
-		if (e.key === 'Tab' && !expandedId && attention > 0) {
-			e.preventDefault();
-			const attentionSessions = sessions.filter(
-				(s) => s.status === 'NeedsPermission' || s.status === 'WaitingForInput'
+		if (e.key === 'Tab' && !expandedId) {
+			// Find first session needing attention across all projects
+			const needsAction = sessions.filter(s =>
+				s.status === SessionStatus.NeedsPermission ||
+				s.status === SessionStatus.WaitingForInput
 			);
-			if (attentionSessions.length > 0) {
-				handleExpand(attentionSessions[0]);
+			if (needsAction.length > 0) {
+				e.preventDefault();
+				handleExpand(needsAction[0]);
 			}
 		}
 	}
@@ -95,11 +159,14 @@
 <svelte:window on:keydown={handleKeydown} />
 
 <div class="dashboard">
-	<DashboardHeader />
+	<div class="window-drag-handle" data-tauri-drag-region></div>
 
 	<main class="grid-container">
 		{#if sessions.length === 0}
 			<div class="empty-state">
+				<div class="system-status-container" style="width: 100%; margin-bottom: var(--space-3xl);">
+					<StatusBar total={0} summary={{ working: 0, permission: 0, input: 0, connecting: 0 }} />
+				</div>
 				<div class="empty-visual">
 					<div class="empty-orb">
 						<div class="orb-core"></div>
@@ -124,18 +191,115 @@
 				</div>
 			</div>
 		{:else}
-			<div class="session-grid">
-				{#each sessions as session, index (session.id)}
-					<div class="grid-item" style="--item-index: {index}">
-						<SessionCard
-							{session}
-							onexpand={() => handleExpand(session)}
-							onapprove={() => handleApprove(session.id)}
-							onsend={(prompt) => handleSend(session.id, prompt)}
-							onstop={() => handleStop(session.pid)}
-							onopen={() => handleOpen(session.pid, session.projectPath)}
-						/>
+			<div class="sections-container">
+				<section class="system-section">
+					<div class="project-header">
+						<span class="project-name">System status</span>
 					</div>
+					<div class="system-status-container">
+						<StatusBar total={sessions.length} {summary} />
+					</div>
+				</section>
+
+				{#each projectGroups as group (group.path)}
+					<section class="project-section">
+						<div class="project-header">
+							<span class="project-name">{group.displayName}</span>
+							<span class="project-count">
+								{group.attention.length + group.idle.length + group.working.length + group.connecting.length}
+							</span>
+						</div>
+
+						<div class="status-groups">
+							{#if group.attention.length > 0}
+								<div class="status-group">
+									<div class="status-header">
+										<span class="status-indicator attention"></span>
+										<span class="status-title">Needs Attention</span>
+										<span class="status-count">{group.attention.length}</span>
+									</div>
+									<div class="session-grid">
+										{#each group.attention as session (session.id)}
+											<SessionCard
+												{session}
+												onexpand={() => handleExpand(session)}
+												onapprove={() => handleApprove(session)}
+												onsend={(prompt) => handleSend(session.id, prompt)}
+												onstop={() => handleStop(session.pid)}
+												onopen={() => handleOpen(session.pid, session.projectPath)}
+											/>
+										{/each}
+									</div>
+								</div>
+							{/if}
+
+							{#if group.idle.length > 0}
+								<div class="status-group">
+									<div class="status-header">
+										<span class="status-indicator idle"></span>
+										<span class="status-title">Idle</span>
+										<span class="status-count">{group.idle.length}</span>
+									</div>
+									<div class="session-grid">
+										{#each group.idle as session (session.id)}
+											<SessionCard
+												{session}
+												onexpand={() => handleExpand(session)}
+												onapprove={() => handleApprove(session)}
+												onsend={(prompt) => handleSend(session.id, prompt)}
+												onstop={() => handleStop(session.pid)}
+												onopen={() => handleOpen(session.pid, session.projectPath)}
+											/>
+										{/each}
+									</div>
+								</div>
+							{/if}
+
+							{#if group.working.length > 0}
+								<div class="status-group">
+									<div class="status-header">
+										<span class="status-indicator working"></span>
+										<span class="status-title">Working</span>
+										<span class="status-count">{group.working.length}</span>
+									</div>
+									<div class="session-grid">
+										{#each group.working as session (session.id)}
+											<SessionCard
+												{session}
+												onexpand={() => handleExpand(session)}
+												onapprove={() => handleApprove(session)}
+												onsend={(prompt) => handleSend(session.id, prompt)}
+												onstop={() => handleStop(session.pid)}
+												onopen={() => handleOpen(session.pid, session.projectPath)}
+											/>
+										{/each}
+									</div>
+								</div>
+							{/if}
+
+							{#if group.connecting.length > 0}
+								<div class="status-group">
+									<div class="status-header">
+										<span class="status-indicator connecting"></span>
+										<span class="status-title">Connecting</span>
+										<span class="status-count">{group.connecting.length}</span>
+									</div>
+									<div class="session-grid">
+										{#each group.connecting as session (session.id)}
+											<SessionCard
+												{session}
+												onexpand={() => handleExpand(session)}
+												onapprove={() => handleApprove(session)}
+												onsend={(prompt) => handleSend(session.id, prompt)}
+												onstop={() => handleStop(session.pid)}
+												onopen={() => handleOpen(session.pid, session.projectPath)}
+											/>
+										{/each}
+									</div>
+								</div>
+							{/if}
+						</div>
+					</section>
 				{/each}
 			</div>
 		{/if}
@@ -149,22 +313,10 @@
 			onsend={(prompt) => handleSend(expandedSession.id, prompt)}
 			onstop={() => handleStop(expandedSession.pid)}
 			onopen={() => handleOpen(expandedSession.pid, expandedSession.projectPath)}
-			onapprove={() => handleApprove(expandedSession.id)}
+			onapprove={() => handleApprove(expandedSession)}
 		/>
 	{/if}
 
-	{#if expandedId && attention > 0}
-		<button type="button" class="attention-float" onclick={handleClose}>
-			<span class="attention-pulse"></span>
-			<span class="attention-count">{attention}</span>
-			<span class="attention-text">
-				{attention === 1 ? 'session needs' : 'sessions need'} attention
-			</span>
-			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-				<polyline points="9 18 15 12 9 6" />
-			</svg>
-		</button>
-	{/if}
 </div>
 
 <style>
@@ -177,25 +329,120 @@
 		background: var(--bg-base);
 	}
 
+	.window-drag-handle {
+		height: 28px;
+		width: 100%;
+		flex-shrink: 0;
+		background: transparent;
+		z-index: 1000;
+	}
+
 	.grid-container {
 		flex: 1;
 		overflow-y: auto;
 		padding: var(--space-xl);
 	}
 
-	.session-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-		grid-auto-rows: 1fr;
-		gap: var(--space-lg);
-		max-width: 1440px;
+	.sections-container {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3xl);
+		max-width: 1200px;
 		margin: 0 auto;
 	}
 
-	.grid-item {
+	.project-section {
 		display: flex;
-		animation: slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards;
-		animation-delay: calc(var(--item-index) * 60ms);
+		flex-direction: column;
+		gap: var(--space-xl);
+	}
+
+	.project-header {
+		display: flex;
+		align-items: baseline;
+		gap: var(--space-md);
+		padding-bottom: var(--space-lg);
+		border-bottom: 2px solid var(--border-default);
+		margin-bottom: var(--space-sm);
+	}
+
+	.project-name {
+		font-family: var(--font-pixel-grid);
+		font-size: 18px;
+		font-weight: 500;
+		color: var(--text-primary);
+		text-transform: uppercase;
+		letter-spacing: 0.15em;
+		line-height: 1;
+	}
+
+	.project-count {
+		font-family: var(--font-pixel-grid);
+		font-size: 18px;
+		font-weight: 500;
+		line-height: 1;
+		color: var(--text-muted);
+	}
+
+	.status-groups {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-xl);
+	}
+
+	.status-group {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-md);
+	}
+
+	.status-header {
+		display: flex;
+		align-items: center;
+		gap: var(--space-sm);
+		padding-left: var(--space-lg);
+	}
+
+	.status-indicator {
+		width: 6px;
+		height: 6px;
+	}
+
+	.status-indicator.attention {
+		background: var(--status-permission);
+	}
+
+	.status-indicator.idle {
+		background: var(--status-input);
+	}
+
+	.status-indicator.working {
+		background: var(--status-working);
+	}
+
+	.status-indicator.connecting {
+		background: var(--status-connecting);
+	}
+
+	.status-title {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		font-weight: 500;
+		color: var(--text-secondary);
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+	}
+
+	.status-count {
+		font-family: var(--font-mono);
+		font-size: 10px;
+		color: var(--text-muted);
+	}
+
+	.session-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+		gap: var(--space-lg);
 	}
 
 	/* Empty State */
@@ -204,15 +451,22 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		height: 70vh;
+		height: 100%;
 		text-align: center;
-		gap: var(--space-2xl);
+		gap: var(--space-3xl);
+		max-width: 1200px;
+		margin: 0 auto;
+		padding: var(--space-3xl) 0;
 	}
 
 	.empty-visual {
 		position: relative;
-		width: 120px;
-		height: 120px;
+		width: 80px;
+		height: 80px;
+		border: 1px solid var(--border-default);
+		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 
 	.empty-orb {
@@ -225,36 +479,14 @@
 	}
 
 	.orb-core {
-		width: 24px;
-		height: 24px;
-		border-radius: 50%;
-		background: var(--accent-blue);
-		box-shadow: 0 0 40px var(--status-working-glow);
-		animation: pulse-glow 3s ease-in-out infinite;
+		width: 8px;
+		height: 8px;
+		background: var(--text-muted);
+		animation: pulse-glow 2s linear infinite;
 	}
 
 	.orb-ring {
-		position: absolute;
-		border-radius: 50%;
-		border: 1px solid var(--accent-blue);
-		opacity: 0.3;
-	}
-
-	.ring-1 {
-		inset: 20px;
-		animation: ring-pulse 3s ease-out infinite;
-	}
-
-	.ring-2 {
-		inset: 10px;
-		animation: ring-pulse 3s ease-out infinite;
-		animation-delay: 1s;
-	}
-
-	.ring-3 {
-		inset: 0;
-		animation: ring-pulse 3s ease-out infinite;
-		animation-delay: 2s;
+		display: none;
 	}
 
 	.empty-content {
@@ -265,15 +497,20 @@
 	}
 
 	.empty-content h2 {
-		font-size: 24px;
-		font-weight: 600;
+		font-family: var(--font-pixel-grid);
+		font-size: 18px;
+		font-weight: 500;
 		color: var(--text-primary);
-		letter-spacing: -0.02em;
+		text-transform: uppercase;
+		letter-spacing: 0.15em;
 	}
 
 	.empty-content p {
-		font-size: 15px;
-		color: var(--text-secondary);
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
 	}
 
 	.empty-hint {
@@ -282,67 +519,16 @@
 		gap: var(--space-sm);
 		margin-top: var(--space-md);
 		padding: var(--space-sm) var(--space-lg);
-		background: var(--bg-card);
 		border: 1px solid var(--border-default);
-		border-radius: var(--radius-lg);
-		font-size: 13px;
+		font-family: var(--font-mono);
+		font-size: 11px;
 		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
 	}
 
 	.hint-icon {
 		display: flex;
-		color: var(--accent-blue);
-	}
-
-	/* Attention Float */
-	.attention-float {
-		position: fixed;
-		bottom: var(--space-xl);
-		right: var(--space-xl);
-		display: flex;
-		align-items: center;
-		gap: var(--space-sm);
-		padding: var(--space-md) var(--space-lg);
-		background: linear-gradient(135deg, var(--status-permission), #ea580c);
-		color: white;
-		border-radius: var(--radius-xl);
-		font-size: 13px;
-		font-weight: 600;
-		box-shadow: 0 4px 24px var(--status-permission-glow), 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
-		z-index: 999;
-		animation: slide-up 0.3s ease;
-		transition: all var(--transition-fast);
-		overflow: hidden;
-	}
-
-	.attention-float:hover {
-		transform: translateY(-2px) scale(1.02);
-		box-shadow: 0 8px 32px var(--status-permission-glow), 0 0 0 1px rgba(255, 255, 255, 0.15) inset;
-	}
-
-	.attention-pulse {
-		position: absolute;
-		inset: 0;
-		background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-		animation: shimmer 2s ease-in-out infinite;
-	}
-
-	.attention-count {
-		position: relative;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		min-width: 24px;
-		height: 24px;
-		padding: 0 6px;
-		background: rgba(0, 0, 0, 0.2);
-		border-radius: var(--radius-md);
-		font-family: var(--font-mono);
-		font-size: 12px;
-	}
-
-	.attention-text {
-		position: relative;
-		white-space: nowrap;
+		color: var(--text-muted);
 	}
 </style>
