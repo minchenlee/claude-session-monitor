@@ -2,9 +2,9 @@ pub mod actions;
 pub mod polling;
 pub mod session;
 
-use actions::{approve_session as approve_session_action, open_session as open_session_action, send_prompt as send_prompt_action, stop_session as stop_session_action};
+use actions::{open_session as open_session_action, stop_session as stop_session_action};
 use polling::{detect_and_enrich_sessions, start_polling, Session};
-use session::{extract_messages, parse_last_n_entries, MessageType};
+use session::{extract_messages, parse_all_entries, MessageType};
 use serde::Serialize;
 use std::time::Duration;
 use tauri::{
@@ -47,8 +47,8 @@ async fn get_conversation(session_id: String) -> Result<Conversation, String> {
         // Check if this project contains the session file directly
         let session_file = project_path.join(&session_filename);
         if session_file.exists() {
-            // Found it - parse the session file (limit to last 50 entries for speed)
-            let entries = parse_last_n_entries(&session_file, 50)
+            // Found it - parse the full session file for conversation view
+            let entries = parse_all_entries(&session_file)
                 .map_err(|e| format!("Failed to parse session file: {}", e))?;
 
             let messages = extract_messages(&entries);
@@ -73,12 +73,6 @@ async fn get_conversation(session_id: String) -> Result<Conversation, String> {
     Err(format!("Session {} not found in any project directory", session_id))
 }
 
-/// Send a prompt to a session
-#[tauri::command]
-async fn send_prompt(session_id: String, prompt: String) -> Result<(), String> {
-    send_prompt_action(session_id, prompt)
-}
-
 /// Stop a session by process ID
 #[tauri::command]
 async fn stop_session(app: AppHandle, pid: u32) -> Result<(), String> {
@@ -100,12 +94,6 @@ async fn stop_session(app: AppHandle, pid: u32) -> Result<(), String> {
 #[tauri::command]
 async fn open_session(pid: u32, project_path: String) -> Result<(), String> {
     open_session_action(pid, project_path)
-}
-
-/// Approve a permission request by sending keystrokes to the terminal
-#[tauri::command]
-async fn approve_session(pid: u32, project_path: String) -> Result<(), String> {
-    approve_session_action(pid, project_path)
 }
 
 /// Rename a session
@@ -191,10 +179,8 @@ pub fn run() {
             greet,
             get_sessions,
             get_conversation,
-            send_prompt,
             stop_session,
             open_session,
-            approve_session,
             rename_session,
             show_main_window
         ])

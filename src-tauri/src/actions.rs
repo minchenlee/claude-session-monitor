@@ -1,5 +1,4 @@
-use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 /// Open a session by focusing its terminal or IDE window
 ///
@@ -225,112 +224,6 @@ fn get_app_name(comm: &str) -> Option<&'static str> {
     }
 }
 
-/// Approve a permission request by sending 'y' + Enter to the terminal
-///
-/// This function:
-/// 1. Finds the parent terminal/IDE application
-/// 2. Activates the window
-/// 3. Sends 'y' keystroke followed by Enter to approve
-pub fn approve_session(pid: u32, project_path: String) -> Result<(), String> {
-    let app_name = find_parent_app(pid)?;
-
-    eprintln!("[approve_session] App: {}, PID: {}", app_name, pid);
-
-    // First, focus the correct window
-    open_session(pid, project_path)?;
-
-    // Small delay to ensure window is focused
-    std::thread::sleep(std::time::Duration::from_millis(100));
-
-    // Send 'y' + Enter keystroke using AppleScript
-    // Different apps need different approaches
-    let script = match app_name.as_str() {
-        "Terminal" => {
-            // Terminal.app - use System Events to send keystrokes
-            r#"
-            tell application "System Events"
-                tell process "Terminal"
-                    keystroke "y"
-                    keystroke return
-                end tell
-            end tell
-            "#.to_string()
-        }
-        "iTerm" | "iTerm2" => {
-            // iTerm2 - use its native write command
-            r#"
-            tell application "iTerm"
-                tell current session of current window
-                    write text "y"
-                end tell
-            end tell
-            "#.to_string()
-        }
-        "Warp" => {
-            // Warp terminal
-            r#"
-            tell application "System Events"
-                tell process "Warp"
-                    keystroke "y"
-                    keystroke return
-                end tell
-            end tell
-            "#.to_string()
-        }
-        "Alacritty" | "kitty" | "Hyper" => {
-            // These terminals don't have great AppleScript support
-            // Fall back to System Events
-            format!(r#"
-            tell application "System Events"
-                tell process "{}"
-                    keystroke "y"
-                    keystroke return
-                end tell
-            end tell
-            "#, app_name)
-        }
-        // IDEs with integrated terminals
-        "Zed" | "Visual Studio Code" | "Cursor" | "Windsurf" => {
-            // For IDEs, we use System Events to send keystrokes
-            // The integrated terminal should receive them when focused
-            format!(r#"
-            tell application "System Events"
-                tell process "{}"
-                    keystroke "y"
-                    keystroke return
-                end tell
-            end tell
-            "#, app_name)
-        }
-        _ => {
-            // Generic fallback using System Events
-            format!(r#"
-            tell application "System Events"
-                tell process "{}"
-                    keystroke "y"
-                    keystroke return
-                end tell
-            end tell
-            "#, app_name)
-        }
-    };
-
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .output()
-        .map_err(|e| format!("Failed to execute osascript: {}", e))?;
-
-    if !output.status.success() {
-        let error = String::from_utf8_lossy(&output.stderr);
-        eprintln!("[approve_session] AppleScript error: {}", error);
-        return Err(format!("Failed to send keystroke: {}", error));
-    }
-
-    eprintln!("[approve_session] Keystroke sent successfully");
-    Ok(())
-}
-
 /// Stop a session by sending SIGTERM to the process
 ///
 /// This gracefully terminates the Claude process by sending a SIGTERM signal.
@@ -357,45 +250,6 @@ pub fn stop_session(pid: u32) -> Result<(), String> {
     Ok(())
 }
 
-/// Send a prompt to a session by spawning the Claude CLI
-///
-/// This function:
-/// 1. Spawns `claude` with --continue and --session-id flags
-/// 2. Pipes the prompt to stdin
-/// 3. Returns immediately (doesn't wait for response)
-pub fn send_prompt(session_id: String, prompt: String) -> Result<(), String> {
-    // Spawn the claude command with --continue and --session-id
-    let mut child = Command::new("claude")
-        .arg("--continue")
-        .arg("--session-id")
-        .arg(&session_id)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn claude command: {}", e))?;
-
-    // Get stdin handle and write the prompt
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(prompt.as_bytes())
-            .map_err(|e| format!("Failed to write prompt to stdin: {}", e))?;
-
-        stdin
-            .write_all(b"\n")
-            .map_err(|e| format!("Failed to write newline to stdin: {}", e))?;
-    } else {
-        return Err("Failed to open stdin for claude process".to_string());
-    }
-
-    // Spawn a thread to reap the child process to avoid zombies
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -412,16 +266,6 @@ mod tests {
     fn test_open_session() {
         // Use current process PID for testing
         let result = open_session(std::process::id(), "/tmp".to_string());
-        println!("Result: {:?}", result);
-    }
-
-    #[test]
-    #[ignore] // This test requires a real session ID and claude CLI
-    fn test_send_prompt() {
-        let result = send_prompt(
-            "test-session-id".to_string(),
-            "Hello from the test!".to_string(),
-        );
         println!("Result: {:?}", result);
     }
 }
