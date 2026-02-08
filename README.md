@@ -24,7 +24,29 @@ Just open c9watch and see everything.
 
 ## Screenshots
 
-<!-- Add screenshots here -->
+### Status view -- see what needs your attention first
+
+Sessions grouped by status. Permission requests surface to the top so you never leave an agent stuck waiting.
+
+![Status view](docs/screenshots/status-view.png)
+
+### Project view -- organize by codebase
+
+Sessions grouped by project, each with its own status columns. See what's happening across all your repos.
+
+![Project view](docs/screenshots/project-view.png)
+
+### Compact view -- monitor at a glance
+
+Minimal cards for when you just need a quick status check without the details.
+
+![Compact view](docs/screenshots/compact-view.png)
+
+### Conversation viewer -- inspect any session
+
+Expand any card to see the full conversation history with formatted code, tool usage, and a navigation map.
+
+![Conversation viewer](docs/screenshots/conversation-view.png)
 
 ## Install
 
