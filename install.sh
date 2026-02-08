@@ -31,9 +31,21 @@ case "$ARCH" in
 esac
 
 OS=$(uname -s)
-if [ "$OS" != "Darwin" ]; then
-  error "c9watch is currently macOS-only. Detected OS: $OS"
-fi
+case "$OS" in
+  MINGW*|MSYS*|CYGWIN*)
+    info "Windows detected. Please use the PowerShell installer instead:"
+    echo ""
+    echo "    irm https://raw.githubusercontent.com/${REPO}/main/install.ps1 | iex"
+    echo ""
+    exit 0
+    ;;
+  Darwin)
+    # macOS - continue installation
+    ;;
+  *)
+    error "This installer supports macOS only. For Windows, use install.ps1. Detected OS: $OS"
+    ;;
+esac
 
 info "Detected macOS ($ARCH_LABEL)"
 

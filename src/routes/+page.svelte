@@ -476,7 +476,7 @@
 	}
 
 	.window-drag-handle {
-		height: 28px;
+		height: 8px;
 		width: 100%;
 		flex-shrink: 0;
 		background: transparent;

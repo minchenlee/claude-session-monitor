@@ -155,10 +155,15 @@ pub fn run() {
 
             // Create the tray icon with click handler
             let app_handle = app.handle().clone();
-            TrayIconBuilder::new()
+            let tray_builder = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
-                .icon_as_template(true)
-                .tooltip("c9watch")
+                .tooltip("c9watch");
+
+            // icon_as_template is macOS-specific (menu bar template icons)
+            #[cfg(target_os = "macos")]
+            let tray_builder = tray_builder.icon_as_template(true);
+
+            tray_builder
                 .on_tray_icon_event(move |_tray, event| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
