@@ -47,7 +47,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
+      "pubkey": "RWQHAcQDpqv9UH4z/qW/4rFnZzmiUUbC7I+K8PZzaOJ9wojU6SFppsEj",
       "endpoints": [
         "https://github.com/minchenlee/c9watch/releases/latest/download/latest.json"
       ]
