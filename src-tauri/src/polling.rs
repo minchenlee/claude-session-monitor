@@ -22,9 +22,11 @@ pub struct Session {
     pub project_path: String,
     pub git_branch: Option<String>,
     pub first_prompt: String,
+    pub summary: Option<String>,
     pub message_count: u32,
     pub modified: String,
     pub status: SessionStatus,
+    pub latest_message: String,
 }
 
 /// Start the background polling loop
@@ -95,9 +97,10 @@ pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
             .as_ref()
             .and_then(|index| index.entries.iter().find(|entry| entry.session_id == session_id));
 
-        let (first_prompt, message_count, modified, git_branch) = match session_entry {
+        let (first_prompt, summary, message_count, modified, git_branch) = match session_entry {
             Some(entry) => (
                 entry.first_prompt.clone(),
+                entry.summary.clone(),
                 entry.message_count,
                 entry.modified.clone(),
                 Some(entry.git_branch.clone()),
@@ -123,22 +126,30 @@ pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
                     })
                     .unwrap_or_default();
 
-                (first_prompt, message_count, modified, None)
+                (first_prompt, None, message_count, modified, None)
             }
         };
 
-        // Parse the session JSONL file to determine status
+        // Parse the session JSONL file to determine status and get latest message
         let session_file_path = detected.project_path.join(format!("{}.jsonl", session_id));
-        let status = match parse_last_n_entries(&session_file_path, 20) {
-            Ok(entries) => determine_status(&entries),
+        let entries = match parse_last_n_entries(&session_file_path, 20) {
+            Ok(entries) => entries,
             Err(e) => {
                 eprintln!(
-                    "Failed to parse session file for {}: {}. Using default status.",
+                    "Failed to parse session file for {}: {}. Using fallback status.",
                     session_id, e
                 );
-                SessionStatus::Connecting
+                vec![]
             }
         };
+
+        let status = if entries.is_empty() {
+            SessionStatus::Connecting
+        } else {
+            determine_status(&entries)
+        };
+
+        let latest_message = get_latest_message_from_entries(&entries);
 
         // Skip empty sessions (0 messages) - these are likely sessions where user
         // immediately used /resume to switch to a different session
@@ -159,9 +170,11 @@ pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
             project_path: detected.cwd.to_string_lossy().to_string(),
             git_branch,
             first_prompt,
+            summary,
             message_count,
             modified,
             status,
+            latest_message,
         });
     }
 
@@ -213,6 +226,46 @@ fn truncate_string(s: &str, max_chars: usize) -> String {
         let truncated: String = s.chars().take(max_chars).collect();
         format!("{}...", truncated)
     }
+}
+
+/// Extract the latest message content from session entries
+fn get_latest_message_from_entries(entries: &[crate::session::parser::SessionEntry]) -> String {
+    if entries.is_empty() {
+        return String::new();
+    }
+
+    // Iterate backwards to find the last user or assistant message
+    for entry in entries.iter().rev() {
+        match entry {
+            crate::session::parser::SessionEntry::User { message, .. } => {
+                // Skip tool result entries - only show actual user prompts
+                if message.is_tool_result {
+                    continue;
+                }
+                return truncate_string(&message.content, 200);
+            }
+            crate::session::parser::SessionEntry::Assistant { message, .. } => {
+                // For assistant, try to find the last text block
+                for content in message.content.iter().rev() {
+                    match content {
+                        crate::session::parser::MessageContent::Text { text } => {
+                            return truncate_string(text, 200);
+                        }
+                        crate::session::parser::MessageContent::Thinking { thinking, .. } => {
+                            return truncate_string(thinking, 200);
+                        }
+                        crate::session::parser::MessageContent::ToolUse { name, .. } => {
+                            return format!("Executing {}...", name);
+                        }
+                        _ => continue,
+                    }
+                }
+            }
+            _ => continue,
+        }
+    }
+
+    String::new()
 }
 
 /// Count user/assistant messages in a JSONL file

@@ -34,6 +34,9 @@ export interface Session {
   /** Summary of the first prompt (shown in list view) */
   firstPrompt: string;
 
+  /** AI-generated summary of the session (from sessions-index.json) */
+  summary: string | null;
+
   /** Total number of messages in the conversation */
   messageCount: number;
 
@@ -42,6 +45,9 @@ export interface Session {
 
   /** Current status of the session */
   status: SessionStatus;
+
+  /** Content of the latest message */
+  latestMessage: string;
 }
 
 /**

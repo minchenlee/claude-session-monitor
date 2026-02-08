@@ -6,13 +6,7 @@ import { writable, derived, get } from 'svelte/store';
 import { listen } from '@tauri-apps/api/event';
 import type { Session, Conversation } from '../types';
 import { SessionStatus } from '../types';
-
-/**
- * Per-session UI state for context preservation
- */
-export interface SessionUIState {
-	draftPrompt: string;
-}
+import { isDemoMode } from '../demo';
 
 /**
  * Store containing all active sessions
@@ -28,34 +22,6 @@ export const expandedSessionId = writable<string | null>(null);
  * Store containing the conversation for the currently expanded session
  */
 export const currentConversation = writable<Conversation | null>(null);
-
-/**
- * Store containing per-session UI state (scroll positions, drafts)
- */
-export const sessionUIState = writable<Map<string, SessionUIState>>(new Map());
-
-/**
- * Get or create UI state for a session
- */
-export function getSessionUIState(sessionId: string): SessionUIState {
-	const state = get(sessionUIState);
-	if (!state.has(sessionId)) {
-		state.set(sessionId, { draftPrompt: '' });
-		sessionUIState.set(state);
-	}
-	return state.get(sessionId)!;
-}
-
-/**
- * Update UI state for a session
- */
-export function updateSessionUIState(sessionId: string, updates: Partial<SessionUIState>) {
-	sessionUIState.update((state) => {
-		const current = state.get(sessionId) || { draftPrompt: '' };
-		state.set(sessionId, { ...current, ...updates });
-		return state;
-	});
-}
 
 /**
  * Derived store: sessions sorted by attention priority
@@ -75,8 +41,8 @@ export const sortedSessions = derived(sessions, ($sessions) => {
 		if (priorityA !== priorityB) {
 			return priorityA - priorityB;
 		}
-		// Same priority: sort by most recent activity
-		return new Date(b.modified).getTime() - new Date(a.modified).getTime();
+		// Same priority: sort by most recent activity (newest at bottom)
+		return new Date(a.modified).getTime() - new Date(b.modified).getTime();
 	});
 });
 
@@ -93,7 +59,7 @@ export const attentionCount = derived(sessions, ($sessions) => {
  * Derived store: status summary for header
  */
 export const statusSummary = derived(sessions, ($sessions) => {
-	const working = $sessions.filter((s) => s.status === SessionStatus.Working).length;
+	const working = $sessions.filter((s) => s.status === SessionStatus.Working || s.status === SessionStatus.Connecting).length;
 	const permission = $sessions.filter((s) => s.status === SessionStatus.NeedsPermission).length;
 	const input = $sessions.filter((s) => s.status === SessionStatus.WaitingForInput).length;
 
@@ -107,7 +73,9 @@ export const statusSummary = derived(sessions, ($sessions) => {
 export async function initializeSessionListeners() {
 	// Listen for session updates from the backend polling loop
 	await listen<Session[]>('sessions-updated', (event) => {
-		sessions.set(event.payload);
+		if (!get(isDemoMode)) {
+			sessions.set(event.payload);
+		}
 	});
 
 	// Listen for conversation updates
