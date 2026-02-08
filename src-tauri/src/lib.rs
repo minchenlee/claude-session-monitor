@@ -147,6 +147,8 @@ pub struct ConversationMessage {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // Start the polling loop when the app starts
             start_polling(app.handle().clone());
@@ -156,7 +158,7 @@ pub fn run() {
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .icon_as_template(true)
-                .tooltip("Claude Session Monitor")
+                .tooltip("c9watch")
                 .on_tray_icon_event(move |_tray, event| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Claude Session Monitor",
+  "productName": "c9watch",
   "version": "0.1.0",
-  "identifier": "com.minchenlee.claude-session-monitor",
+  "identifier": "com.minchenlee.c9watch",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Claude Session Monitor",
+        "title": "c9watch",
         "width": 900,
         "height": 600,
         "minWidth": 600,
@@ -42,6 +42,15 @@
       "minimumSystemVersion": "10.15",
       "signingIdentity": null,
       "entitlements": null
+    },
+    "createUpdaterArtifacts": "v1Compatible"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/anthropics/c9watch/releases/latest/download/latest.json"
+      ]
     }
   }
 }

@@ -55,10 +55,9 @@ jobs:
       - name: Rename artifacts for clarity
         run: |
           cd src-tauri/target/${{ matrix.target }}/release/bundle
-          # Rename DMG
           if [ -d dmg ]; then
             for f in dmg/*.dmg; do
-              mv "$f" "dmg/Claude-Session-Monitor_${{ github.ref_name }}_${{ matrix.arch }}.dmg"
+              mv "$f" "dmg/c9watch_${{ github.ref_name }}_${{ matrix.arch }}.dmg"
             done
           fi
 
@@ -73,6 +72,14 @@ jobs:
         with:
           name: macos-app-${{ matrix.arch }}
           path: src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
+
+      - name: Upload updater signature (if exists)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: updater-sig-${{ matrix.arch }}
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz*
+          if-no-files-found: ignore
 
   create-release:
     needs: build-macos
@@ -91,10 +98,43 @@ jobs:
           for arch in aarch64 x86_64; do
             if [ -d "macos-app-${arch}" ]; then
               cd "macos-app-${arch}"
-              tar -czf "../Claude-Session-Monitor_${{ github.ref_name }}_${arch}.app.tar.gz" *.app
+              tar -czf "../c9watch_${{ github.ref_name }}_${arch}.app.tar.gz" *.app
               cd ..
             fi
           done
+
+      - name: Generate updater JSON manifest
+        run: |
+          VERSION="${{ github.ref_name }}"
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Read signatures if they exist
+          AARCH64_SIG=""
+          X86_64_SIG=""
+          if [ -f "artifacts/updater-sig-aarch64/"*.sig ]; then
+            AARCH64_SIG=$(cat artifacts/updater-sig-aarch64/*.sig 2>/dev/null || echo "")
+          fi
+          if [ -f "artifacts/updater-sig-x86_64/"*.sig ]; then
+            X86_64_SIG=$(cat artifacts/updater-sig-x86_64/*.sig 2>/dev/null || echo "")
+          fi
+
+          cat > artifacts/latest.json << MANIFEST
+          {
+            "version": "${VERSION}",
+            "notes": "See the release notes on GitHub",
+            "pub_date": "${DATE}",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "${AARCH64_SIG}",
+                "url": "https://github.com/${{ github.repository }}/releases/download/${VERSION}/c9watch_${VERSION}_aarch64.app.tar.gz"
+              },
+              "darwin-x86_64": {
+                "signature": "${X86_64_SIG}",
+                "url": "https://github.com/${{ github.repository }}/releases/download/${VERSION}/c9watch_${VERSION}_x86_64.app.tar.gz"
+              }
+            }
+          }
+          MANIFEST
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -104,3 +144,4 @@ jobs:
           files: |
             artifacts/macos-dmg-*/*.dmg
             artifacts/*.app.tar.gz
+            artifacts/latest.json

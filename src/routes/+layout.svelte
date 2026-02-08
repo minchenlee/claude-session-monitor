@@ -3,6 +3,7 @@
 	import { initializeSessionListeners, sessions } from '$lib/stores/sessions';
 	import { getSessions } from '$lib/api';
 	import { loadDemoDataIfActive } from '$lib/demo';
+	import { checkForUpdates } from '$lib/updater';
 	import '../app.css';
 
 	onMount(async () => {
@@ -17,6 +18,9 @@
 			const initialSessions = await getSessions();
 			sessions.set(initialSessions);
 		}
+
+		// Check for updates in the background (non-blocking)
+		checkForUpdates();
 	});
 </script>
 
