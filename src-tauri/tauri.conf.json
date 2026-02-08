@@ -40,8 +40,8 @@
     "category": "DeveloperTool",
     "macOS": {
       "minimumSystemVersion": "10.15",
-      "signingIdentity": null,
-      "entitlements": null
+      "signingIdentity": "-",
+      "entitlements": "entitlements.plist"
     },
     "createUpdaterArtifacts": "v1Compatible"
   },
