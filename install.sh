@@ -42,9 +42,9 @@ info "Detected macOS ($ARCH_LABEL)"
 info "Fetching latest release..."
 
 LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-  | grep '"tag_name"' \
+  | grep '"tag_name":' \
   | head -1 \
-  | sed -E 's/.*"tag_name":\s*"([^"]+)".*/\1/')
+  | cut -d'"' -f4)
 
 if [ -z "$LATEST_TAG" ]; then
   error "Could not determine the latest release. Check https://github.com/${REPO}/releases"
