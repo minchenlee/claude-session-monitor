@@ -295,7 +295,7 @@ impl SessionDetector {
             // Check if the process name is "claude"
             let name = process.name().to_string_lossy();
 
-            if name.contains("claude") && !name.contains("claude-session-monitor") {
+            if name.contains("claude") && !name.contains("c9watch") {
                 // Get the current working directory of the process
                 let cwd = process.cwd().map(|p| p.to_path_buf());
                 let start_time = process.start_time();

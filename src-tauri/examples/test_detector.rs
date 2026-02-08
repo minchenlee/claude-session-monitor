@@ -1,4 +1,4 @@
-use claude_session_monitor_lib::session::SessionDetector;
+use c9watch_lib::session::SessionDetector;
 
 fn main() {
     println!("Claude Session Detector Test\n");

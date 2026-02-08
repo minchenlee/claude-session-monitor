@@ -1,5 +1,5 @@
 /**
- * Component exports for Claude Session Monitor
+ * Component exports for c9watch
  */
 
 export { default as SessionItem } from './SessionItem.svelte';

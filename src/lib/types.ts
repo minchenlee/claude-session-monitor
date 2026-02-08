@@ -1,5 +1,5 @@
 /**
- * TypeScript type definitions for Claude Session Monitor
+ * TypeScript type definitions for c9watch
  */
 
 /**

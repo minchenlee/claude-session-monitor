@@ -2,7 +2,7 @@ use std::env;
 use std::path::PathBuf;
 
 // Import from the library
-use claude_session_monitor_lib::session::{
+use c9watch_lib::session::{
     parse_sessions_index, parse_last_n_entries, extract_messages,
 };
 

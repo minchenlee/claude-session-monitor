@@ -12,8 +12,8 @@
 set -euo pipefail
 
 VERSION="${1:?Usage: $0 <version-tag>}"
-REPO="${GITHUB_REPOSITORY:-anthropics/claude-session-monitor}"
-CASK_FILE="homebrew/claude-session-monitor.rb"
+REPO="${GITHUB_REPOSITORY:-anthropics/c9watch}"
+CASK_FILE="homebrew/c9watch.rb"
 
 echo "Downloading release artifacts for ${VERSION}..."
 
@@ -50,5 +50,5 @@ echo "  aarch64: ${AARCH64_SHA}"
 echo "  x86_64:  ${X86_64_SHA}"
 echo ""
 echo "Next steps:"
-echo "  1. Copy ${CASK_FILE} to your homebrew-tap repo as Casks/claude-session-monitor.rb"
+echo "  1. Copy ${CASK_FILE} to your homebrew-tap repo as Casks/c9watch.rb"
 echo "  2. Commit and push the tap repo"

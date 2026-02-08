@@ -251,6 +251,21 @@
 					</button>
 					<div class="header-spacer"></div>
 					<div class="view-toggle">
+						<button
+							class="toggle-btn"
+							class:active={isCompact}
+							onclick={() => isCompact = !isCompact}
+							title="Compact View"
+						>
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<polyline points="4 14 10 14 10 20" />
+								<polyline points="20 10 14 10 14 4" />
+								<line x1="14" y1="10" x2="21" y2="3" />
+								<line x1="3" y1="21" x2="10" y2="14" />
+							</svg>
+						</button>
+					</div>
+					<div class="view-toggle">
 						<button 
 							class="toggle-btn" 
 							class:active={viewMode === 'project'} 
@@ -277,19 +292,6 @@
 								<rect x="14" y="3" width="7" height="7" rx="1" />
 								<rect x="14" y="14" width="7" height="7" rx="1" />
 								<rect x="3" y="14" width="7" height="7" rx="1" />
-							</svg>
-						</button>
-						<div class="toggle-divider"></div>
-						<button
-							class="toggle-btn"
-							class:active={isCompact}
-							onclick={() => isCompact = !isCompact}
-							title="Compact View"
-						>
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-								<rect x="3" y="4" width="18" height="4" rx="1" />
-								<rect x="3" y="10" width="18" height="4" rx="1" />
-								<rect x="3" y="16" width="18" height="4" rx="1" />
 							</svg>
 						</button>
 					</div>

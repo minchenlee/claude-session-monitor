@@ -1,6 +1,6 @@
 # Frontend Library
 
-This directory contains the core TypeScript/Svelte libraries for the Claude Session Monitor frontend.
+This directory contains the core TypeScript/Svelte libraries for the c9watch frontend.
 
 ## Structure
 

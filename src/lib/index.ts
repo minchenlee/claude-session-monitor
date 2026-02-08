@@ -1,5 +1,5 @@
 /**
- * Main library exports for Claude Session Monitor
+ * Main library exports for c9watch
  */
 
 // Re-export all types
