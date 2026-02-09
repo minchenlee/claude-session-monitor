@@ -13,7 +13,6 @@ We appreciate all contributions, big and small. Thank you to the following peopl
 ### Platform Support
 
 - **Ray Lee** ([@cynaptic](https://github.com/cynaptic)) - Added Linux support ([#2](https://github.com/minchenlee/c9watch/pull/2))
-- **Eric** ([@ntuee10](https://github.com/ntuee10)) - Working on Windows 11 support ([#1](https://github.com/minchenlee/c9watch/pull/1))
 
 ---
 
