@@ -32,7 +32,9 @@ export async function getConversation(sessionId: string): Promise<Conversation> 
 }
 
 /**
- * Stop a running session by sending SIGTERM
+ * Stop a running session by terminating the process
+ * On Unix: Sends SIGTERM for graceful termination
+ * On Windows: Uses taskkill for process termination
  * @param pid - The process ID of the Claude session
  * @returns Promise resolving when the stop signal has been sent
  */
