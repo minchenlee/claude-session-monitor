@@ -1,0 +1,39 @@
+{
+  "projectName": "c9watch",
+  "projectOwner": "minchenlee",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "commitConvention": "angular",
+  "contributors": [
+    {
+      "login": "minchenlee",
+      "name": "Min-Chen Lee",
+      "avatar_url": "https://github.com/minchenlee.png",
+      "profile": "https://github.com/minchenlee",
+      "contributions": [
+        "code",
+        "doc",
+        "design",
+        "infra"
+      ]
+    },
+    {
+      "login": "cynaptic",
+      "name": "Ray Lee",
+      "avatar_url": "https://github.com/cynaptic.png",
+      "profile": "https://github.com/cynaptic",
+      "contributions": [
+        "code",
+        "platform"
+      ]
+    }
+  ],
+  "contributorsPerLine": 7,
+  "skipCi": true,
+  "badgeTemplate": "[![All Contributors](https://img.shields.io/badge/all_contributors-<%= contributors.length %>-orange.svg)](#contributors)"
+}
