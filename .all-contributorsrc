@@ -31,6 +31,15 @@
         "code",
         "platform"
       ]
+    },
+    {
+      "login": "grimmerk",
+      "name": "Grimmer Kang",
+      "avatar_url": "https://github.com/grimmerk.png",
+      "profile": "https://github.com/grimmerk",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
