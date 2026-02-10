@@ -16,6 +16,12 @@ pub fn open_session(pid: u32, project_path: String) -> Result<(), String> {
 
     eprintln!("[open_session] App: {}, Project: {}, Path: {}", app_name, project_name, project_path);
 
+    // iTerm2: use tty matching to focus the correct tab (macOS only)
+    #[cfg(target_os = "macos")]
+    if app_name == "iTerm" || app_name == "iTerm2" {
+        return focus_iterm2_session(pid);
+    }
+
     // Try to use app-specific CLI to open/focus the correct window
     if let Some(cli_path) = get_app_cli(&app_name) {
         eprintln!("[open_session] Using CLI: {} to open: {}", cli_path, project_path);
@@ -52,6 +58,87 @@ pub fn open_session(pid: u32, project_path: String) -> Result<(), String> {
 
     // Platform-specific fallback to activate the app
     activate_app_fallback(&app_name)?;
+
+    Ok(())
+}
+
+/// Get the controlling tty of a process via `ps -o tty=`
+#[cfg(target_os = "macos")]
+fn get_process_tty(pid: u32) -> Option<String> {
+    let output = Command::new("ps")
+        .arg("-o").arg("tty=")
+        .arg("-p").arg(pid.to_string())
+        .output().ok()?;
+    let tty = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if tty.is_empty() || tty == "??" { None } else { Some(tty) }
+}
+
+/// Walk up the process tree to find a tty (Claude may be a child process)
+#[cfg(target_os = "macos")]
+fn get_session_tty(pid: u32) -> Option<String> {
+    let mut current_pid = pid;
+    for _ in 0..10 {
+        if let Some(tty) = get_process_tty(current_pid) {
+            return Some(tty);
+        }
+        let ppid_output = Command::new("ps")
+            .arg("-o").arg("ppid=")
+            .arg("-p").arg(current_pid.to_string())
+            .output().ok()?;
+        let ppid: u32 = String::from_utf8_lossy(&ppid_output.stdout)
+            .trim().parse().ok()?;
+        if ppid <= 1 { break; }
+        current_pid = ppid;
+    }
+    None
+}
+
+/// Focus the correct iTerm2 tab/session by matching tty
+#[cfg(target_os = "macos")]
+fn focus_iterm2_session(pid: u32) -> Result<(), String> {
+    let tty = get_session_tty(pid);
+    eprintln!("[open_session] iTerm2 tty for PID {}: {:?}", pid, tty);
+
+    let Some(tty) = tty else {
+        // No tty found — just activate iTerm2
+        let _ = Command::new("osascript")
+            .arg("-e")
+            .arg(r#"tell application "iTerm2" to activate"#)
+            .output();
+        return Ok(());
+    };
+
+    // AppleScript: iterate all iTerm2 sessions, match by tty, focus it
+    let script = format!(
+        r#"
+        tell application "iTerm2"
+            activate
+            repeat with w in windows
+                repeat with t in tabs of w
+                    repeat with s in sessions of t
+                        if tty of s ends with "{tty}" then
+                            select s
+                            select t
+                            set index of w to 1
+                            return "found"
+                        end if
+                    end repeat
+                end repeat
+            end repeat
+            return "not found"
+        end tell
+        "#,
+        tty = tty
+    );
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to run AppleScript: {}", e))?;
+
+    let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    eprintln!("[open_session] iTerm2 tty match result: {}", result);
 
     Ok(())
 }
@@ -323,6 +410,16 @@ fn get_app_name(comm: &str) -> Option<&'static str> {
             if comm_lower.contains("sublime text.app") {
                 return Some("Sublime Text");
             }
+        }
+    }
+
+    // macOS: iTerm2 uses a server process like iTermServer-3.6.6
+    // The path looks like: ~/Library/Application Support/iTerm2/iTermServer-X.Y.Z
+    #[cfg(target_os = "macos")]
+    {
+        let comm_lower = comm.to_lowercase();
+        if comm_lower.contains("itermserver") || comm_lower.contains("/iterm2/") {
+            return Some("iTerm");
         }
     }
 
