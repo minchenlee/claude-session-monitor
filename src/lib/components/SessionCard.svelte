@@ -25,6 +25,7 @@
 
 	let isEditingTitle = $state(false);
 	let tempTitle = $state(session.customTitle || session.summary || session.firstPrompt);
+	let terminalTitleHint = $state<string | null>(null);
 
 	let cardTitle = $derived(session.customTitle || session.summary || session.firstPrompt);
 
@@ -124,13 +125,23 @@
 		} else if (e.key === 'Escape') {
 			tempTitle = session.customTitle || session.summary || session.firstPrompt;
 			isEditingTitle = false;
+		} else if (e.key === 'Tab' && terminalTitleHint && !tempTitle.trim()) {
+			e.preventDefault();
+			tempTitle = terminalTitleHint;
 		}
 	}
 
-	function startEditing(e?: MouseEvent) {
+	async function startEditing(e?: MouseEvent) {
 		e?.stopPropagation();
 		tempTitle = session.customTitle || session.summary || session.firstPrompt;
 		isEditingTitle = true;
+		// Fetch terminal title (iTerm2) as rename hint
+		try {
+			const title = await invoke<string | null>('get_terminal_title', { pid: session.pid });
+			terminalTitleHint = title;
+		} catch {
+			terminalTitleHint = null;
+		}
 	}
 
 	function autofocus(node: HTMLElement) {
@@ -162,6 +173,7 @@
 					type="text"
 					class="title-input"
 					bind:value={tempTitle}
+					placeholder={terminalTitleHint ?? ''}
 					onkeydown={handleTitleKeydown}
 					onblur={saveTitle}
 					use:autofocus
@@ -326,6 +338,11 @@
 		text-transform: uppercase;
 		width: 100%;
 		outline: none;
+	}
+
+	.title-input::placeholder {
+		color: var(--text-muted);
+		opacity: 0.5;
 	}
 
 	.session-name-badge {
