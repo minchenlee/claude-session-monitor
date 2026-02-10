@@ -78,7 +78,8 @@
 		const target = e.target as HTMLElement;
 		if (
 			target.closest('.action-btn') ||
-			target.closest('.project-name-input')
+			target.closest('.project-name-input') ||
+			target.closest('.title-input')
 		) {
 			return;
 		}
@@ -127,7 +128,11 @@
 			isEditingTitle = false;
 		} else if (e.key === 'Tab' && terminalTitleHint && !tempTitle.trim()) {
 			e.preventDefault();
+			e.stopPropagation();
 			tempTitle = terminalTitleHint;
+			// Re-focus the input after Svelte re-renders
+			const input = e.target as HTMLInputElement;
+			requestAnimationFrame(() => input.focus());
 		}
 	}
 
