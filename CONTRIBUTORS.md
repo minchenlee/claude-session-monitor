@@ -14,6 +14,10 @@ We appreciate all contributions, big and small. Thank you to the following peopl
 
 - **Ray Lee** ([@cynaptic](https://github.com/cynaptic)) - Added Linux support ([#2](https://github.com/minchenlee/c9watch/pull/2))
 
+### Features
+
+- **Grimmer Kang** ([@grimmerk](https://github.com/grimmerk)) - Added iTerm2 tab focusing via TTY matching ([#5](https://github.com/minchenlee/c9watch/pull/5))
+
 ---
 
 ## How to Get Listed
