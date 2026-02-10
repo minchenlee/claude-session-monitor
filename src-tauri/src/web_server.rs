@@ -3,13 +3,20 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
     },
+    http::{header, StatusCode},
     response::IntoResponse,
     routing::get,
     Json, Router,
 };
+use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::broadcast;
+
+/// Embed the SvelteKit build output into the binary
+#[derive(Embed)]
+#[folder = "../build/"]
+struct Assets;
 
 /// WebSocket server port
 pub const WS_PORT: u16 = 9210;
@@ -82,6 +89,7 @@ pub async fn start_server(state: Arc<WsState>) {
         .route("/ws", get(ws_handler))
         .route("/health", get(health))
         .route("/info", get(info))
+        .fallback(get(serve_static_fallback))
         .with_state(state);
 
     // [::] accepts both IPv4 and IPv6 (localhost can resolve to ::1)
@@ -111,6 +119,40 @@ async fn info() -> Json<serde_json::Value> {
         "name": "c9watch",
         "version": env!("CARGO_PKG_VERSION"),
     }))
+}
+
+// ── Static file serving (mobile client) ─────────────────────────────
+
+async fn serve_static_fallback(uri: axum::http::Uri) -> impl IntoResponse {
+    let path = uri.path().trim_start_matches('/');
+    if path.is_empty() {
+        return serve_embedded_file("index.html");
+    }
+    serve_embedded_file(path)
+}
+
+fn serve_embedded_file(path: &str) -> impl IntoResponse {
+    match Assets::get(path) {
+        Some(file) => {
+            let mime = mime_guess::from_path(path).first_or_octet_stream();
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, mime.as_ref().to_string())],
+                file.data.into_owned(),
+            )
+                .into_response()
+        }
+        // SPA fallback: serve index.html for unmatched routes
+        None => match Assets::get("index.html") {
+            Some(file) => (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/html".to_string())],
+                file.data.into_owned(),
+            )
+                .into_response(),
+            None => (StatusCode::NOT_FOUND, "Not found").into_response(),
+        },
+    }
 }
 
 // ── WebSocket handler ───────────────────────────────────────────────

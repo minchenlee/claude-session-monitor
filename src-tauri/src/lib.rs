@@ -203,11 +203,12 @@ pub fn run() {
             let port = web_server::WS_PORT;
 
             let ws_url = format!("ws://{}:{}/ws?token={}", local_ip, port, token);
+            let http_url = format!("http://{}:{}/?token={}", local_ip, port, token);
 
             eprintln!("\n[c9watch] Mobile connection ready");
             eprintln!("[c9watch] Token: {}", token);
-            eprintln!("[c9watch] URL:   {}\n", ws_url);
-            qr2term::print_qr(&ws_url).ok();
+            eprintln!("[c9watch] URL:   {}\n", http_url);
+            qr2term::print_qr(&http_url).ok();
             eprintln!();
 
             let (sessions_tx, _rx) = tokio::sync::broadcast::channel::<String>(16);

@@ -16,8 +16,8 @@
 		try {
 			info = await getServerInfo();
 			// QR encodes an HTTP URL so phone camera opens the browser directly
-			const devPort = window.location.port || '1420';
-			pageUrl = `http://${info.localIp}:${devPort}/?wsUrl=${encodeURIComponent(info.wsUrl)}`;
+			// In production, the axum server on port 9210 serves the frontend files
+			pageUrl = `http://${info.localIp}:${info.port}/?token=${info.token}`;
 			qrDataUrl = await QRCode.toDataURL(pageUrl, {
 				width: 256,
 				margin: 2,
@@ -112,7 +112,7 @@
 			</div>
 
 			<div class="instructions">
-				<p>Scan QR with phone camera to auto-connect, or enter the token manually on the mobile connection screen.</p>
+				<p>Scan QR with phone camera to open in browser, or enter the token manually on the mobile connection screen.</p>
 			</div>
 		{/if}
 	</div>

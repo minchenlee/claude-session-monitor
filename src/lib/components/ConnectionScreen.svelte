@@ -1,19 +1,16 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import { Html5Qrcode } from 'html5-qrcode';
+	import { onMount } from 'svelte';
 	import { setStoredWsUrl, getStoredWsUrl, clearStoredWsUrl, wsClient } from '$lib/ws';
 	import { initializeSessionListeners, sessions } from '$lib/stores/sessions';
 	import { getSessions } from '$lib/api';
 
 	let { onconnected }: { onconnected: () => void } = $props();
 
-	let mode = $state<'choose' | 'scan' | 'token' | 'url'>('choose');
+	let mode = $state<'choose' | 'token' | 'url'>('choose');
 	let connecting = $state(false);
 	let tokenInput = $state('');
 	let urlInput = $state('');
 	let inputError = $state('');
-	let scanError = $state('');
-	let scanner: Html5Qrcode | null = null;
 
 	const WS_PORT = 9210;
 
@@ -65,51 +62,9 @@
 		doConnect(wsUrl);
 	}
 
-	async function startScanner() {
-		mode = 'scan';
-		scanError = '';
-
-		// Wait for DOM to render the reader element
-		await new Promise((r) => requestAnimationFrame(r));
-		await new Promise((r) => requestAnimationFrame(r));
-
-		try {
-			scanner = new Html5Qrcode('qr-reader');
-			await scanner.start(
-				{ facingMode: 'environment' },
-				{ fps: 10, qrbox: { width: 250, height: 250 } },
-				(decodedText) => {
-					stopScanner();
-					doConnect(decodedText);
-				},
-				() => {
-					// ignore scan failures (no QR in frame)
-				}
-			);
-		} catch (e) {
-			scanError =
-				e instanceof Error ? e.message : 'Camera access denied or not available';
-			mode = 'choose';
-		}
-	}
-
-	function stopScanner() {
-		if (scanner) {
-			try {
-				(scanner.stop() as unknown as Promise<void>)?.catch?.(() => {});
-				(scanner.clear() as unknown as Promise<void>)?.catch?.(() => {});
-			} catch {
-				// ignore cleanup errors
-			}
-			scanner = null;
-		}
-	}
-
 	function goBack() {
-		stopScanner();
 		mode = 'choose';
 		inputError = '';
-		scanError = '';
 	}
 
 	onMount(() => {
@@ -117,19 +72,26 @@
 		const existing = getStoredWsUrl();
 		if (existing) {
 			doConnect(existing);
+			return;
 		}
 
-		// Auto-connect from QR code: ?wsUrl=ws://...
 		const params = new URLSearchParams(window.location.search);
+
+		// Auto-connect from QR code: ?token=hextoken
+		const tokenParam = params.get('token');
+		if (tokenParam) {
+			window.history.replaceState({}, '', window.location.pathname);
+			const host = window.location.hostname;
+			doConnect(`ws://${host}:${WS_PORT}/ws?token=${tokenParam}`);
+			return;
+		}
+
+		// Legacy: ?wsUrl=ws://...
 		const wsUrlParam = params.get('wsUrl');
 		if (wsUrlParam) {
 			window.history.replaceState({}, '', window.location.pathname);
 			doConnect(wsUrlParam);
 		}
-	});
-
-	onDestroy(() => {
-		stopScanner();
 	});
 </script>
 
@@ -163,25 +125,9 @@
 					<span class="option-desc">Type the token shown on desktop</span>
 				</button>
 
-				<button class="option-btn" onclick={startScanner}>
-					<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-						<path d="M7 3H5a2 2 0 0 0-2 2v2" />
-						<path d="M17 3h2a2 2 0 0 1 2 2v2" />
-						<path d="M21 17v2a2 2 0 0 1-2 2h-2" />
-						<path d="M7 21H5a2 2 0 0 1-2-2v-2" />
-						<rect x="7" y="7" width="10" height="10" rx="1" />
-					</svg>
-					<span class="option-label">Scan QR Code</span>
-					<span class="option-desc">Use camera to scan QR from desktop</span>
-				</button>
-
 				<button class="option-btn secondary" onclick={() => (mode = 'url')}>
 					<span class="option-label">Advanced: Paste Full URL</span>
 				</button>
-
-				{#if scanError}
-					<div class="error">{scanError}</div>
-				{/if}
 			</div>
 		{:else if mode === 'token'}
 			<div class="paste-view">
@@ -206,13 +152,6 @@
 						Connect
 					</button>
 				</div>
-			</div>
-		{:else if mode === 'scan'}
-			<div class="scan-view">
-				<div class="scanner-wrapper">
-					<div id="qr-reader"></div>
-				</div>
-				<button class="back-btn" onclick={goBack}>Cancel</button>
 			</div>
 		{:else if mode === 'url'}
 			<div class="paste-view">
@@ -339,33 +278,6 @@
 		font-family: var(--font-mono);
 		font-size: 11px;
 		color: var(--text-muted);
-	}
-
-	/* Scan view */
-	.scan-view {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: var(--space-xl);
-		width: 100%;
-	}
-
-	.scanner-wrapper {
-		width: 100%;
-		border: 1px solid var(--border-default);
-		overflow: hidden;
-	}
-
-	.scanner-wrapper :global(#qr-reader) {
-		width: 100%;
-	}
-
-	.scanner-wrapper :global(#qr-reader video) {
-		border: none !important;
-	}
-
-	.scanner-wrapper :global(#qr-reader__scan_region) {
-		min-height: 250px;
 	}
 
 	/* Paste view */
