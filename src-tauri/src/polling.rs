@@ -235,9 +235,13 @@ pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
             SessionStatus::Connecting
         } else {
             let raw_status = determine_status(&entries);
-            // Override WaitingForInput if the JSONL file was recently modified
+            // Override WaitingForInput if the JSONL file was recently modified.
             // This catches progress entries (bash_progress, thinking updates) that
-            // don't get parsed as meaningful entries but indicate active work
+            // don't get parsed as meaningful entries but indicate active work.
+            //
+            // Why 8 seconds? Polling runs every 2s, Claude writes progress every 1-3s
+            // during active work. 8s provides buffer for gaps without delaying "Ready"
+            // transition when work truly finishes.
             if raw_status == SessionStatus::WaitingForInput
                 && is_file_recently_modified(&session_file_path, 8)
             {

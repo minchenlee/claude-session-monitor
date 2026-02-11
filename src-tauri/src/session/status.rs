@@ -68,8 +68,9 @@ pub fn determine_status(entries: &[SessionEntry]) -> SessionStatus {
             // Check if this is a tool_result or an actual user prompt.
             // Tool results mean Claude is still processing.
             if message.is_tool_result {
-                // This is a tool result - Claude should be generating its next response
-                // But if it's old, the session might be idle (process died, etc.)
+                // This is a tool result - Claude should be generating its next response.
+                // But if it's old, the session might be idle (process died, etc.).
+                // 30s threshold (increased from 15s) accommodates API latency and longer operations.
                 if is_entry_recent(&base.timestamp, 30) {
                     SessionStatus::Working
                 } else {
@@ -97,7 +98,8 @@ pub fn determine_status(entries: &[SessionEntry]) -> SessionStatus {
                     let has_pending_tools = has_pending_tool_uses(&message.content);
 
                     if has_pending_tools {
-                        // Tool is pending - check if there's active progress or recent activity
+                        // Tool is pending - check if there's active progress or recent activity.
+                        // 20s threshold (increased from 10s) accommodates tool execution time.
                         if has_trailing_progress || is_entry_recent(&base.timestamp, 20) {
                             SessionStatus::Working
                         } else {
@@ -109,6 +111,7 @@ pub fn determine_status(entries: &[SessionEntry]) -> SessionStatus {
                         // Since stop_reason is always None in JSONL, we use recency:
                         // if the entry was written recently, Claude is likely still
                         // streaming or about to write more. If old, session is idle.
+                        // 20s threshold (increased from 10s) accommodates streaming and thinking pauses.
                         if is_entry_recent(&base.timestamp, 20) {
                             SessionStatus::Working
                         } else {
