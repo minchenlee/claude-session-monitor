@@ -32,6 +32,30 @@ export const currentConversation = writable<Conversation | null>(null);
 export const notificationPermission = writable<'granted' | 'denied' | 'default'>('default');
 
 /**
+ * In-app toast notifications (for web clients without Notification API)
+ */
+export interface InAppNotification {
+	id: number;
+	title: string;
+	body: string;
+}
+export const inAppNotifications = writable<InAppNotification[]>([]);
+let notifCounter = 0;
+
+export function showInAppNotification(title: string, body: string) {
+	const id = ++notifCounter;
+	inAppNotifications.update((list) => [...list, { id, title, body }]);
+	// Flash page title
+	const originalTitle = document.title;
+	document.title = `🔔 ${title}`;
+	setTimeout(() => { document.title = originalTitle; }, 3000);
+	// Auto-dismiss after 5s
+	setTimeout(() => {
+		inAppNotifications.update((list) => list.filter((n) => n.id !== id));
+	}, 5000);
+}
+
+/**
  * Derived store: sessions sorted by attention priority
  * Priority: NeedsPermission > WaitingForInput > Working > Connecting
  */
@@ -126,6 +150,11 @@ async function initWebSocketListeners() {
 			sessions.set(data);
 		}
 	});
+
+	wsClient.on('notification', (data: { title: string; body: string; sessionId: string; pid: number }) => {
+		if (get(isDemoMode)) return;
+		showInAppNotification(data.title, data.body);
+	});
 }
 
 // ── Tauri IPC mode ──────────────────────────────────────────────────
@@ -157,41 +186,43 @@ async function initTauriListeners() {
 }
 
 /**
- * Check if notification permission is granted (Tauri only)
+ * Check if notification permission is granted
  */
 export async function checkNotificationPermission() {
-	if (!isTauri()) {
-		notificationPermission.set('default');
-		return false;
+	if (isTauri()) {
+		try {
+			const granted = await isPermissionGranted();
+			notificationPermission.set(granted ? 'granted' : 'default');
+			return granted;
+		} catch (error) {
+			console.error('[notification] Failed to check permission:', error);
+			notificationPermission.set('default');
+			return false;
+		}
 	}
-	try {
-		const granted = await isPermissionGranted();
-		notificationPermission.set(granted ? 'granted' : 'default');
-		return granted;
-	} catch (error) {
-		console.error('[notification] Failed to check permission:', error);
-		notificationPermission.set('default');
-		return false;
-	}
+	// Web: in-app notifications always available (no permission needed)
+	notificationPermission.set('granted');
+	return true;
 }
 
 /**
- * Request notification permission from the user (Tauri only)
+ * Request notification permission from the user
  */
 export async function requestNotificationPermission() {
-	if (!isTauri()) {
-		notificationPermission.set('denied');
-		return false;
+	if (isTauri()) {
+		try {
+			const permission = await requestPermission();
+			notificationPermission.set(permission);
+			return permission === 'granted';
+		} catch (error) {
+			console.error('[notification] Failed to request permission:', error);
+			notificationPermission.set('denied');
+			return false;
+		}
 	}
-	try {
-		const permission = await requestPermission();
-		notificationPermission.set(permission);
-		return permission === 'granted';
-	} catch (error) {
-		console.error('[notification] Failed to request permission:', error);
-		notificationPermission.set('denied');
-		return false;
-	}
+	// Web: in-app notifications always available
+	notificationPermission.set('granted');
+	return true;
 }
 
 // Legacy alias for backward compatibility

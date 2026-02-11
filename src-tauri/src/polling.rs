@@ -43,7 +43,11 @@ pub struct Session {
 /// 3. Tracks status transitions and fires notifications
 /// 4. Emits "sessions-updated" events to the frontend
 /// 5. Broadcasts session data to WebSocket clients
-pub fn start_polling(app: AppHandle, sessions_tx: tokio::sync::broadcast::Sender<String>) {
+pub fn start_polling(
+    app: AppHandle,
+    sessions_tx: tokio::sync::broadcast::Sender<String>,
+    notifications_tx: tokio::sync::broadcast::Sender<String>,
+) {
     thread::spawn(move || {
         let app_handle = Arc::new(app);
         let poll_interval = Duration::from_secs(2);
@@ -93,6 +97,7 @@ pub fn start_polling(app: AppHandle, sessions_tx: tokio::sync::broadcast::Sender
                                         if should_notify {
                                             fire_notification(
                                                 &app_handle,
+                                                &notifications_tx,
                                                 &session.id,
                                                 &session.first_prompt,
                                                 &session.session_name,
@@ -403,6 +408,7 @@ struct NotificationMetadata {
 /// Fire a notification for a status transition
 fn fire_notification(
     app_handle: &AppHandle,
+    notifications_tx: &tokio::sync::broadcast::Sender<String>,
     session_id: &str,
     first_prompt: &str,
     session_name: &str,
@@ -454,6 +460,17 @@ fn fire_notification(
 
     if let Err(e) = app_handle.emit("notification-fired", &metadata) {
         eprintln!("Failed to emit notification-fired event: {}", e);
+    }
+
+    // Broadcast to WebSocket clients for web notifications
+    let ws_notification = serde_json::json!({
+        "title": title,
+        "body": body,
+        "sessionId": session_id,
+        "pid": pid,
+    });
+    if let Ok(json) = serde_json::to_string(&ws_notification) {
+        let _ = notifications_tx.send(json);
     }
 }
 

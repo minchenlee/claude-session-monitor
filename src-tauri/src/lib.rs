@@ -227,6 +227,7 @@ pub fn run() {
             eprintln!();
 
             let (sessions_tx, _rx) = tokio::sync::broadcast::channel::<String>(16);
+            let (notifications_tx, _nrx) = tokio::sync::broadcast::channel::<String>(16);
 
             let server_info = ServerInfo {
                 token: token.clone(),
@@ -239,11 +240,12 @@ pub fn run() {
             let ws_state = Arc::new(web_server::WsState {
                 auth_token: token,
                 sessions_tx: sessions_tx.clone(),
+                notifications_tx: notifications_tx.clone(),
             });
             tauri::async_runtime::spawn(web_server::start_server(ws_state));
 
             // ── Polling loop ────────────────────────────────────
-            start_polling(app.handle().clone(), sessions_tx);
+            start_polling(app.handle().clone(), sessions_tx, notifications_tx);
 
             // ── Tray icon ───────────────────────────────────────
             let app_handle = app.handle().clone();

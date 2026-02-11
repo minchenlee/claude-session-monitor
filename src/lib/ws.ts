@@ -90,9 +90,13 @@ class WsClient {
 		try {
 			const msg = JSON.parse(event.data);
 
-			// Server push notifications → forward to event listeners
+			// Server push events → forward to event listeners
 			if (msg.type === 'sessionsUpdated') {
 				this.emit('sessionsUpdated', msg.data);
+				return;
+			}
+			if (msg.type === 'notification') {
+				this.emit('notification', msg.data);
 				return;
 			}
 
@@ -141,9 +145,10 @@ export const wsClient = new WsClient();
 
 // ── Transport helpers ────────────────────────────────────────────────
 
-/** Check if running inside Tauri desktop */
+/** Check if running inside Tauri desktop (not just bundled JS with the property) */
 export function isTauri(): boolean {
-	return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+	return typeof window !== 'undefined' &&
+		typeof (window as any).__TAURI_INTERNALS__?.invoke === 'function';
 }
 
 /** Get stored WS URL (set by QR code scan on mobile) */

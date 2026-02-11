@@ -1,7 +1,9 @@
 <script lang="ts">
 	import type { Session } from '$lib/types';
 	import { SessionStatus } from '$lib/types';
+	import { renameSession } from '$lib/api';
 	import { invoke } from '@tauri-apps/api/core';
+	import { isTauri } from '$lib/ws';
 
 
 	interface Props {
@@ -26,8 +28,16 @@
 	let isEditingTitle = $state(false);
 	let tempTitle = $state(session.customTitle || session.summary || session.firstPrompt);
 	let terminalTitleHint = $state<string | null>(null);
+	let optimisticTitle = $state<string | null>(null);
 
-	let cardTitle = $derived(session.customTitle || session.summary || session.firstPrompt);
+	let cardTitle = $derived(optimisticTitle || session.customTitle || session.summary || session.firstPrompt);
+
+	// Clear optimistic title once polling delivers the real update
+	$effect(() => {
+		if (optimisticTitle && session.customTitle === optimisticTitle) {
+			optimisticTitle = null;
+		}
+	});
 
 	function getStatusColor(): string {
 		switch (session.status) {
@@ -107,17 +117,22 @@
 		onopen?.();
 	}
 
+	let saving = false;
 	async function saveTitle() {
+		if (!isEditingTitle || saving) return;
+		saving = true;
+		isEditingTitle = false;
 		const currentTitle = session.customTitle || session.summary || session.firstPrompt;
 		if (tempTitle.trim() && tempTitle !== currentTitle) {
 			try {
-				await invoke('rename_session', { sessionId: session.id, newName: tempTitle.trim() });
+				await renameSession(session.id, tempTitle.trim());
+				optimisticTitle = tempTitle.trim();
 			} catch (err) {
 				console.error('Failed to rename session:', err);
-				tempTitle = currentTitle;
+				optimisticTitle = null;
 			}
 		}
-		isEditingTitle = false;
+		saving = false;
 	}
 
 	function handleTitleKeydown(e: KeyboardEvent) {
@@ -140,12 +155,14 @@
 		e?.stopPropagation();
 		tempTitle = session.customTitle || session.summary || session.firstPrompt;
 		isEditingTitle = true;
-		// Fetch terminal title (iTerm2) as rename hint
-		try {
-			const title = await invoke<string | null>('get_terminal_title', { pid: session.pid });
-			terminalTitleHint = title;
-		} catch {
-			terminalTitleHint = null;
+		// Fetch terminal title (iTerm2) as rename hint (Tauri only)
+		if (isTauri()) {
+			try {
+				const title = await invoke<string | null>('get_terminal_title', { pid: session.pid });
+				terminalTitleHint = title;
+			} catch {
+				terminalTitleHint = null;
+			}
 		}
 	}
 
@@ -583,10 +600,27 @@
 			font-size: 13px;
 		}
 
+		.stats-row {
+			flex-wrap: wrap;
+			gap: var(--space-xs);
+		}
+
+		.session-name-badge {
+			max-width: 60%;
+		}
+
+		.branch-name {
+			max-width: 150px;
+		}
+
 		.task-preview {
 			font-size: 13px;
 			-webkit-line-clamp: 2;
 			line-clamp: 2;
+		}
+
+		.card-actions {
+			flex-wrap: wrap;
 		}
 	}
 

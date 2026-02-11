@@ -18,6 +18,7 @@
 	import SessionCard from '$lib/components/SessionCard.svelte';
 	import ExpandedCardOverlay from '$lib/components/ExpandedCardOverlay.svelte';
 	import NotificationPermissionBanner from '$lib/components/NotificationPermissionBanner.svelte';
+	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
 	import QRCodeModal from '$lib/components/QRCodeModal.svelte';
 	import ConnectionScreen from '$lib/components/ConnectionScreen.svelte';
 	import type { Session } from '$lib/types';
@@ -192,6 +193,9 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
+		const tag = (e.target as HTMLElement)?.tagName;
+		if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
 		if (e.key === 'd' && (e.metaKey || e.ctrlKey)) {
 			e.preventDefault();
 			toggleDemoMode();
@@ -481,6 +485,7 @@
 		<QRCodeModal onclose={() => (showQRModal = false)} />
 	{/if}
 
+	<ToastNotifications />
 </div>
 {/if}
 

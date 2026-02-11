@@ -25,6 +25,7 @@ pub const WS_PORT: u16 = 9210;
 pub struct WsState {
     pub auth_token: String,
     pub sessions_tx: broadcast::Sender<String>,
+    pub notifications_tx: broadcast::Sender<String>,
 }
 
 // ── Protocol types ──────────────────────────────────────────────────
@@ -79,6 +80,9 @@ enum ServerMsg {
 
     #[serde(rename = "ok")]
     Ok,
+
+    #[serde(rename = "notification")]
+    Notification { data: serde_json::Value },
 }
 
 // ── Server entrypoint ───────────────────────────────────────────────
@@ -182,6 +186,7 @@ async fn ws_handler(
 async fn handle_socket(mut socket: WebSocket, state: Arc<WsState>) {
     eprintln!("[ws-server] Client connected");
     let mut sessions_rx = state.sessions_tx.subscribe();
+    let mut notifications_rx = state.notifications_tx.subscribe();
 
     loop {
         tokio::select! {
@@ -214,6 +219,16 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WsState>) {
             Ok(sessions_json) = sessions_rx.recv() => {
                 let msg = ServerMsg::SessionsUpdated {
                     data: serde_json::from_str(&sessions_json).unwrap_or_default(),
+                };
+                let json = serde_json::to_string(&msg).unwrap_or_default();
+                if socket.send(Message::Text(json)).await.is_err() {
+                    break;
+                }
+            }
+            // Push notifications to WS clients
+            Ok(notif_json) = notifications_rx.recv() => {
+                let msg = ServerMsg::Notification {
+                    data: serde_json::from_str(&notif_json).unwrap_or_default(),
                 };
                 let json = serde_json::to_string(&msg).unwrap_or_default();
                 if socket.send(Message::Text(json)).await.is_err() {
