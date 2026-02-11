@@ -2,9 +2,7 @@ use std::env;
 use std::path::PathBuf;
 
 // Import from the library
-use c9watch_lib::session::{
-    parse_sessions_index, parse_last_n_entries, extract_messages,
-};
+use c9watch_lib::session::{extract_messages, parse_last_n_entries, parse_sessions_index};
 
 fn main() {
     let home = env::var("HOME").expect("HOME env var not set");

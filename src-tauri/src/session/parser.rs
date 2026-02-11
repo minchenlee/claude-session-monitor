@@ -95,7 +95,8 @@ impl<'de> Deserialize<'de> for UserMessage {
         use serde_json::Value;
 
         let value = Value::deserialize(deserializer)?;
-        let role = value.get("role")
+        let role = value
+            .get("role")
             .and_then(|r| r.as_str())
             .unwrap_or("user")
             .to_string();
@@ -114,7 +115,9 @@ impl<'de> Deserialize<'de> for UserMessage {
                                     Value::String(s) => parts.push(s.clone()),
                                     Value::Array(inner) => {
                                         for block in inner {
-                                            if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                                            if let Some(text) =
+                                                block.get("text").and_then(|t| t.as_str())
+                                            {
                                                 parts.push(text.to_string());
                                             }
                                         }
@@ -210,10 +213,11 @@ pub fn parse_sessions_index<P: AsRef<Path>>(path: P) -> Result<SessionsIndex, St
 /// This function uses a reverse-reading strategy to avoid loading
 /// the entire file into memory for large files.
 pub fn read_last_n_lines<P: AsRef<Path>>(path: P, n: usize) -> Result<Vec<String>, String> {
-    let file = File::open(path.as_ref())
-        .map_err(|e| format!("Failed to open JSONL file: {}", e))?;
+    let file =
+        File::open(path.as_ref()).map_err(|e| format!("Failed to open JSONL file: {}", e))?;
 
-    let metadata = file.metadata()
+    let metadata = file
+        .metadata()
         .map_err(|e| format!("Failed to read file metadata: {}", e))?;
 
     let file_size = metadata.len();
@@ -226,8 +230,9 @@ pub fn read_last_n_lines<P: AsRef<Path>>(path: P, n: usize) -> Result<Vec<String
     // For small files, just read everything
     if file_size < 10_000 {
         let reader = BufReader::new(file);
-        let lines: Vec<String> = reader.lines()
-            .filter_map(|line| line.ok())
+        let lines: Vec<String> = reader
+            .lines()
+            .map_while(Result::ok)
             .filter(|line| !line.trim().is_empty())
             .collect();
 
@@ -244,8 +249,9 @@ pub fn read_last_n_lines<P: AsRef<Path>>(path: P, n: usize) -> Result<Vec<String
         .map_err(|e| format!("Failed to seek in file: {}", e))?;
 
     let reader = BufReader::new(file);
-    let lines: Vec<String> = reader.lines()
-        .filter_map(|line| line.ok())
+    let lines: Vec<String> = reader
+        .lines()
+        .map_while(Result::ok)
         .filter(|line| !line.trim().is_empty())
         .collect();
 
@@ -257,10 +263,7 @@ pub fn read_last_n_lines<P: AsRef<Path>>(path: P, n: usize) -> Result<Vec<String
 pub fn parse_jsonl_entries(lines: Vec<String>) -> Vec<SessionEntry> {
     lines
         .iter()
-        .filter_map(|line| {
-            serde_json::from_str::<SessionEntry>(line)
-                .ok()
-        })
+        .filter_map(|line| serde_json::from_str::<SessionEntry>(line).ok())
         .collect()
 }
 
@@ -275,13 +278,13 @@ pub fn parse_last_n_entries<P: AsRef<Path>>(
 
 /// Parse all entries from a session JSONL file
 pub fn parse_all_entries<P: AsRef<Path>>(path: P) -> Result<Vec<SessionEntry>, String> {
-    let file = File::open(path.as_ref())
-        .map_err(|e| format!("Failed to open JSONL file: {}", e))?;
+    let file =
+        File::open(path.as_ref()).map_err(|e| format!("Failed to open JSONL file: {}", e))?;
 
     let reader = BufReader::new(file);
     let lines: Vec<String> = reader
         .lines()
-        .filter_map(|line| line.ok())
+        .map_while(Result::ok)
         .filter(|line| !line.trim().is_empty())
         .collect();
 
@@ -340,13 +343,18 @@ pub fn extract_messages(entries: &[SessionEntry]) -> Vec<(String, MessageType, S
                                 tool_desc,
                             ));
                         }
-                        MessageContent::ToolResult { tool_use_id, content, is_error } => {
+                        MessageContent::ToolResult {
+                            tool_use_id,
+                            content,
+                            is_error,
+                        } => {
                             let result_type = if is_error.unwrap_or(false) {
                                 "Error"
                             } else {
                                 "Result"
                             };
-                            let tool_desc = format!("[{}] {}: {}", result_type, tool_use_id, content);
+                            let tool_desc =
+                                format!("[{}] {}: {}", result_type, tool_use_id, content);
                             messages.push((
                                 base.timestamp.clone(),
                                 MessageType::ToolResult,
@@ -495,7 +503,10 @@ mod tests {
         }"#;
 
         let entry: Result<SessionEntry, _> = serde_json::from_str(json);
-        assert!(entry.is_ok(), "Should parse user message with array content");
+        assert!(
+            entry.is_ok(),
+            "Should parse user message with array content"
+        );
 
         if let Ok(SessionEntry::User { message, .. }) = entry {
             assert!(message.content.contains("command output here"));
@@ -527,7 +538,10 @@ mod tests {
         }"#;
 
         let entry: Result<SessionEntry, _> = serde_json::from_str(json);
-        assert!(entry.is_ok(), "Should parse user message with nested array tool_result content");
+        assert!(
+            entry.is_ok(),
+            "Should parse user message with nested array tool_result content"
+        );
 
         if let Ok(SessionEntry::User { message, .. }) = entry {
             assert!(message.content.contains("file contents here"));

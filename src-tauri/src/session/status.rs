@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
-use std::sync::OnceLock;
-use super::parser::{SessionEntry, MessageContent, AssistantMessage};
+use super::parser::{AssistantMessage, MessageContent, SessionEntry};
 use super::permissions::PermissionChecker;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 
 /// Global permission checker (loaded once from settings)
 static PERMISSION_CHECKER: OnceLock<PermissionChecker> = OnceLock::new();
@@ -46,7 +46,10 @@ pub fn determine_status(entries: &[SessionEntry]) -> SessionStatus {
     // Claude Code writes "progress" entries during tool execution (e.g., bash_progress)
     // which must not override the actual session status.
     let last_meaningful = entries.iter().rev().find(|entry| {
-        matches!(entry, SessionEntry::User { .. } | SessionEntry::Assistant { .. })
+        matches!(
+            entry,
+            SessionEntry::User { .. } | SessionEntry::Assistant { .. }
+        )
     });
 
     let last_entry = match last_meaningful {
@@ -56,12 +59,18 @@ pub fn determine_status(entries: &[SessionEntry]) -> SessionStatus {
 
     // Also check if there are any recent progress entries AFTER the last meaningful entry.
     // Progress entries (e.g., bash_progress) indicate active tool execution.
-    let last_meaningful_idx = entries.iter().rposition(|entry| {
-        matches!(entry, SessionEntry::User { .. } | SessionEntry::Assistant { .. })
-    }).unwrap_or(0);
-    let has_trailing_progress = entries[last_meaningful_idx + 1..].iter().any(|entry| {
-        matches!(entry, SessionEntry::Unknown)
-    });
+    let last_meaningful_idx = entries
+        .iter()
+        .rposition(|entry| {
+            matches!(
+                entry,
+                SessionEntry::User { .. } | SessionEntry::Assistant { .. }
+            )
+        })
+        .unwrap_or(0);
+    let has_trailing_progress = entries[last_meaningful_idx + 1..]
+        .iter()
+        .any(|entry| matches!(entry, SessionEntry::Unknown));
 
     match last_entry {
         SessionEntry::User { base, message } => {
@@ -70,7 +79,7 @@ pub fn determine_status(entries: &[SessionEntry]) -> SessionStatus {
             if message.is_tool_result {
                 // This is a tool result - Claude should be generating its next response
                 // But if it's old, the session might be idle (process died, etc.)
-                if is_entry_recent(&base.timestamp, 15) {
+                if is_entry_recent(&base.timestamp, 30) {
                     SessionStatus::Working
                 } else {
                     SessionStatus::WaitingForInput
@@ -98,7 +107,7 @@ pub fn determine_status(entries: &[SessionEntry]) -> SessionStatus {
 
                     if has_pending_tools {
                         // Tool is pending - check if there's active progress or recent activity
-                        if has_trailing_progress || is_entry_recent(&base.timestamp, 10) {
+                        if has_trailing_progress || is_entry_recent(&base.timestamp, 20) {
                             SessionStatus::Working
                         } else {
                             // Pending tool but no recent activity - likely stale
@@ -109,7 +118,7 @@ pub fn determine_status(entries: &[SessionEntry]) -> SessionStatus {
                         // Since stop_reason is always None in JSONL, we use recency:
                         // if the entry was written recently, Claude is likely still
                         // streaming or about to write more. If old, session is idle.
-                        if is_entry_recent(&base.timestamp, 10) {
+                        if is_entry_recent(&base.timestamp, 20) {
                             SessionStatus::Working
                         } else {
                             SessionStatus::WaitingForInput
@@ -145,9 +154,10 @@ fn is_entry_recent(timestamp: &str, seconds: i64) -> bool {
 /// Analyzes an assistant message to determine status
 fn analyze_assistant_message(message: &AssistantMessage) -> SessionStatus {
     // Check if the message contains any tool uses
-    let has_tool_use = message.content.iter().any(|content| {
-        matches!(content, MessageContent::ToolUse { .. })
-    });
+    let has_tool_use = message
+        .content
+        .iter()
+        .any(|content| matches!(content, MessageContent::ToolUse { .. }));
 
     if has_tool_use {
         // Check if all tool uses have corresponding results
@@ -254,7 +264,8 @@ pub fn get_pending_tool_name(entries: &[SessionEntry]) -> Option<String> {
     let checker = get_permission_checker();
 
     // Get IDs of tools that have results
-    let completed_ids: Vec<&str> = last_assistant.content
+    let completed_ids: Vec<&str> = last_assistant
+        .content
         .iter()
         .filter_map(|c| {
             if let MessageContent::ToolResult { tool_use_id, .. } = c {
@@ -348,14 +359,18 @@ pub fn determine_status_with_context(entries: &[SessionEntry]) -> SessionStatus 
         let prev_entry = &entries[entries.len() - 2];
 
         if let (
-            SessionEntry::Assistant { message: last_msg, .. },
+            SessionEntry::Assistant {
+                message: last_msg, ..
+            },
             SessionEntry::Assistant { .. },
-        ) = (last_entry, prev_entry) {
+        ) = (last_entry, prev_entry)
+        {
             // If both are assistant messages and last one has no tool use,
             // might be waiting for input
-            let last_has_tools = last_msg.content.iter().any(|c| {
-                matches!(c, MessageContent::ToolUse { .. })
-            });
+            let last_has_tools = last_msg
+                .content
+                .iter()
+                .any(|c| matches!(c, MessageContent::ToolUse { .. }));
 
             if !last_has_tools && last_msg.stop_reason.is_some() {
                 return SessionStatus::WaitingForInput;
@@ -410,257 +425,231 @@ mod tests {
 
     #[test]
     fn test_user_message_means_working() {
-        let entries = vec![
-            SessionEntry::User {
-                base: create_base(),
-                message: UserMessage {
-                    role: "user".to_string(),
-                    content: "Hello".to_string(),
-                    is_tool_result: false,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::User {
+            base: create_base(),
+            message: UserMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+                is_tool_result: false,
+            },
+        }];
         assert_eq!(determine_status(&entries), SessionStatus::Working);
     }
 
     #[test]
     fn test_assistant_text_completed() {
         // Old entry with end_turn should be WaitingForInput
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_old_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::Text {
-                            text: "Hello there!".to_string(),
-                        }
-                    ],
-                    stop_reason: Some("end_turn".to_string()),
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_old_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![MessageContent::Text {
+                    text: "Hello there!".to_string(),
+                }],
+                stop_reason: Some("end_turn".to_string()),
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(determine_status(&entries), SessionStatus::WaitingForInput);
     }
 
     #[test]
     fn test_assistant_generating() {
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::Text {
-                            text: "Thinking...".to_string(),
-                        }
-                    ],
-                    stop_reason: None,
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![MessageContent::Text {
+                    text: "Thinking...".to_string(),
+                }],
+                stop_reason: None,
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(determine_status(&entries), SessionStatus::Working);
     }
 
     #[test]
     fn test_tool_use_pending_auto_approved() {
         // Read is auto-approved, so pending Read should be Working
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::ToolUse {
-                            id: "toolu_123".to_string(),
-                            name: "Read".to_string(),
-                            input: serde_json::json!({"file_path": "/test/file.txt"}),
-                        }
-                    ],
-                    stop_reason: Some("tool_use".to_string()),
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![MessageContent::ToolUse {
+                    id: "toolu_123".to_string(),
+                    name: "Read".to_string(),
+                    input: serde_json::json!({"file_path": "/test/file.txt"}),
+                }],
+                stop_reason: Some("tool_use".to_string()),
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(determine_status(&entries), SessionStatus::Working);
     }
 
     #[test]
     fn test_tool_use_pending_needs_permission() {
         // Bash with unknown command needs permission
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::ToolUse {
-                            id: "toolu_123".to_string(),
-                            name: "Bash".to_string(),
-                            input: serde_json::json!({"command": "rm -rf /some/path"}),
-                        }
-                    ],
-                    stop_reason: Some("tool_use".to_string()),
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![MessageContent::ToolUse {
+                    id: "toolu_123".to_string(),
+                    name: "Bash".to_string(),
+                    input: serde_json::json!({"command": "rm -rf /some/path"}),
+                }],
+                stop_reason: Some("tool_use".to_string()),
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(determine_status(&entries), SessionStatus::NeedsPermission);
     }
 
     #[test]
     fn test_tool_use_completed() {
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::ToolUse {
-                            id: "toolu_123".to_string(),
-                            name: "Read".to_string(),
-                            input: serde_json::json!({"file_path": "/test/file.txt"}),
-                        },
-                        MessageContent::ToolResult {
-                            tool_use_id: "toolu_123".to_string(),
-                            content: "File content here".to_string(),
-                            is_error: Some(false),
-                        }
-                    ],
-                    stop_reason: Some("end_turn".to_string()),
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![
+                    MessageContent::ToolUse {
+                        id: "toolu_123".to_string(),
+                        name: "Read".to_string(),
+                        input: serde_json::json!({"file_path": "/test/file.txt"}),
+                    },
+                    MessageContent::ToolResult {
+                        tool_use_id: "toolu_123".to_string(),
+                        content: "File content here".to_string(),
+                        is_error: Some(false),
+                    },
+                ],
+                stop_reason: Some("end_turn".to_string()),
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(determine_status(&entries), SessionStatus::WaitingForInput);
     }
 
     #[test]
     fn test_multiple_tools_partially_completed_auto_approved() {
         // Both tools are Read (auto-approved), so even partial = Working
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::ToolUse {
-                            id: "toolu_123".to_string(),
-                            name: "Read".to_string(),
-                            input: serde_json::json!({"file_path": "/test/file1.txt"}),
-                        },
-                        MessageContent::ToolUse {
-                            id: "toolu_456".to_string(),
-                            name: "Read".to_string(),
-                            input: serde_json::json!({"file_path": "/test/file2.txt"}),
-                        },
-                        MessageContent::ToolResult {
-                            tool_use_id: "toolu_123".to_string(),
-                            content: "File 1 content".to_string(),
-                            is_error: Some(false),
-                        }
-                    ],
-                    stop_reason: Some("tool_use".to_string()),
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![
+                    MessageContent::ToolUse {
+                        id: "toolu_123".to_string(),
+                        name: "Read".to_string(),
+                        input: serde_json::json!({"file_path": "/test/file1.txt"}),
+                    },
+                    MessageContent::ToolUse {
+                        id: "toolu_456".to_string(),
+                        name: "Read".to_string(),
+                        input: serde_json::json!({"file_path": "/test/file2.txt"}),
+                    },
+                    MessageContent::ToolResult {
+                        tool_use_id: "toolu_123".to_string(),
+                        content: "File 1 content".to_string(),
+                        is_error: Some(false),
+                    },
+                ],
+                stop_reason: Some("tool_use".to_string()),
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(determine_status(&entries), SessionStatus::Working);
     }
 
     #[test]
     fn test_multiple_tools_partially_completed_needs_permission() {
         // One Read (auto) completed, one Bash (needs permission) pending
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::ToolUse {
-                            id: "toolu_123".to_string(),
-                            name: "Read".to_string(),
-                            input: serde_json::json!({"file_path": "/test/file1.txt"}),
-                        },
-                        MessageContent::ToolUse {
-                            id: "toolu_456".to_string(),
-                            name: "Bash".to_string(),
-                            input: serde_json::json!({"command": "make build"}),
-                        },
-                        MessageContent::ToolResult {
-                            tool_use_id: "toolu_123".to_string(),
-                            content: "File 1 content".to_string(),
-                            is_error: Some(false),
-                        }
-                    ],
-                    stop_reason: Some("tool_use".to_string()),
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![
+                    MessageContent::ToolUse {
+                        id: "toolu_123".to_string(),
+                        name: "Read".to_string(),
+                        input: serde_json::json!({"file_path": "/test/file1.txt"}),
+                    },
+                    MessageContent::ToolUse {
+                        id: "toolu_456".to_string(),
+                        name: "Bash".to_string(),
+                        input: serde_json::json!({"command": "make build"}),
+                    },
+                    MessageContent::ToolResult {
+                        tool_use_id: "toolu_123".to_string(),
+                        content: "File 1 content".to_string(),
+                        is_error: Some(false),
+                    },
+                ],
+                stop_reason: Some("tool_use".to_string()),
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(determine_status(&entries), SessionStatus::NeedsPermission);
     }
 
     #[test]
     fn test_multiple_tools_all_completed() {
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::ToolUse {
-                            id: "toolu_123".to_string(),
-                            name: "Read".to_string(),
-                            input: serde_json::json!({"file_path": "/test/file1.txt"}),
-                        },
-                        MessageContent::ToolUse {
-                            id: "toolu_456".to_string(),
-                            name: "Read".to_string(),
-                            input: serde_json::json!({"file_path": "/test/file2.txt"}),
-                        },
-                        MessageContent::ToolResult {
-                            tool_use_id: "toolu_123".to_string(),
-                            content: "File 1 content".to_string(),
-                            is_error: Some(false),
-                        },
-                        MessageContent::ToolResult {
-                            tool_use_id: "toolu_456".to_string(),
-                            content: "File 2 content".to_string(),
-                            is_error: Some(false),
-                        }
-                    ],
-                    stop_reason: Some("end_turn".to_string()),
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![
+                    MessageContent::ToolUse {
+                        id: "toolu_123".to_string(),
+                        name: "Read".to_string(),
+                        input: serde_json::json!({"file_path": "/test/file1.txt"}),
+                    },
+                    MessageContent::ToolUse {
+                        id: "toolu_456".to_string(),
+                        name: "Read".to_string(),
+                        input: serde_json::json!({"file_path": "/test/file2.txt"}),
+                    },
+                    MessageContent::ToolResult {
+                        tool_use_id: "toolu_123".to_string(),
+                        content: "File 1 content".to_string(),
+                        is_error: Some(false),
+                    },
+                    MessageContent::ToolResult {
+                        tool_use_id: "toolu_456".to_string(),
+                        content: "File 2 content".to_string(),
+                        is_error: Some(false),
+                    },
+                ],
+                stop_reason: Some("end_turn".to_string()),
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(determine_status(&entries), SessionStatus::WaitingForInput);
     }
 
@@ -676,17 +665,15 @@ mod tests {
                 tool_use_id: "toolu_1".to_string(),
                 content: "result".to_string(),
                 is_error: None,
-            }
+            },
         ];
         assert!(check_all_tools_completed(&content));
 
-        let incomplete_content = vec![
-            MessageContent::ToolUse {
-                id: "toolu_1".to_string(),
-                name: "Read".to_string(),
-                input: serde_json::json!({}),
-            }
-        ];
+        let incomplete_content = vec![MessageContent::ToolUse {
+            id: "toolu_1".to_string(),
+            name: "Read".to_string(),
+            input: serde_json::json!({}),
+        }];
         assert!(!check_all_tools_completed(&incomplete_content));
     }
 
@@ -701,13 +688,11 @@ mod tests {
                     model: "claude-opus-4-5-20251101".to_string(),
                     id: "msg_test".to_string(),
                     role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::ToolUse {
-                            id: "toolu_123".to_string(),
-                            name: "Bash".to_string(),
-                            input: serde_json::json!({"command": "cargo build"}),
-                        }
-                    ],
+                    content: vec![MessageContent::ToolUse {
+                        id: "toolu_123".to_string(),
+                        name: "Bash".to_string(),
+                        input: serde_json::json!({"command": "rm -rf /dangerous"}),
+                    }],
                     stop_reason: Some("tool_use".to_string()),
                     stop_sequence: None,
                     usage: None,
@@ -720,7 +705,7 @@ mod tests {
         // Should NOT be WaitingForInput - should see the pending Bash tool
         let status = determine_status(&entries);
         assert_ne!(status, SessionStatus::WaitingForInput);
-        // Bash with "cargo build" is not in default auto-approved list
+        // Bash with "rm -rf" is definitely not in any auto-approved list
         assert_eq!(status, SessionStatus::NeedsPermission);
     }
 
@@ -745,10 +730,7 @@ mod tests {
     #[test]
     fn test_only_unknown_entries_means_connecting() {
         // If all entries are Unknown (e.g., all progress), treat as Connecting
-        let entries = vec![
-            SessionEntry::Unknown,
-            SessionEntry::Unknown,
-        ];
+        let entries = vec![SessionEntry::Unknown, SessionEntry::Unknown];
         assert_eq!(determine_status(&entries), SessionStatus::Connecting);
     }
 
@@ -756,24 +738,20 @@ mod tests {
     fn test_old_assistant_text_no_stop_reason_is_idle() {
         // Realistic scenario: stop_reason is always None in Claude Code JSONL.
         // An old text-only assistant message with no stop_reason should be idle.
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_old_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::Text {
-                            text: "Here's my response.".to_string(),
-                        }
-                    ],
-                    stop_reason: None,
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_old_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![MessageContent::Text {
+                    text: "Here's my response.".to_string(),
+                }],
+                stop_reason: None,
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(determine_status(&entries), SessionStatus::WaitingForInput);
     }
 
@@ -781,147 +759,127 @@ mod tests {
     fn test_recent_assistant_text_no_stop_reason_is_working() {
         // Recent text-only assistant message with no stop_reason means
         // Claude is still actively streaming / generating
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::Text {
-                            text: "Working on it...".to_string(),
-                        }
-                    ],
-                    stop_reason: None,
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![MessageContent::Text {
+                    text: "Working on it...".to_string(),
+                }],
+                stop_reason: None,
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(determine_status(&entries), SessionStatus::Working);
     }
 
     #[test]
     fn test_old_user_prompt_is_idle() {
         // A user prompt from long ago with no response should be idle
-        let entries = vec![
-            SessionEntry::User {
-                base: create_old_base(),
-                message: UserMessage {
-                    role: "user".to_string(),
-                    content: "Hello".to_string(),
-                    is_tool_result: false,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::User {
+            base: create_old_base(),
+            message: UserMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+                is_tool_result: false,
+            },
+        }];
         assert_eq!(determine_status(&entries), SessionStatus::WaitingForInput);
     }
 
     #[test]
     fn test_get_pending_tool_name_needs_permission() {
         // Bash command that needs permission
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::ToolUse {
-                            id: "toolu_123".to_string(),
-                            name: "Bash".to_string(),
-                            input: serde_json::json!({"command": "rm -rf /some/path"}),
-                        }
-                    ],
-                    stop_reason: Some("tool_use".to_string()),
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![MessageContent::ToolUse {
+                    id: "toolu_123".to_string(),
+                    name: "Bash".to_string(),
+                    input: serde_json::json!({"command": "rm -rf /some/path"}),
+                }],
+                stop_reason: Some("tool_use".to_string()),
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(get_pending_tool_name(&entries), Some("Bash".to_string()));
     }
 
     #[test]
     fn test_get_pending_tool_name_auto_approved() {
         // Read is auto-approved, should return None
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::ToolUse {
-                            id: "toolu_123".to_string(),
-                            name: "Read".to_string(),
-                            input: serde_json::json!({"file_path": "/test/file.txt"}),
-                        }
-                    ],
-                    stop_reason: Some("tool_use".to_string()),
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![MessageContent::ToolUse {
+                    id: "toolu_123".to_string(),
+                    name: "Read".to_string(),
+                    input: serde_json::json!({"file_path": "/test/file.txt"}),
+                }],
+                stop_reason: Some("tool_use".to_string()),
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(get_pending_tool_name(&entries), None);
     }
 
     #[test]
     fn test_get_pending_tool_name_no_tools() {
         // No tools in the message
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::Text {
-                            text: "Just text, no tools".to_string(),
-                        }
-                    ],
-                    stop_reason: Some("end_turn".to_string()),
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![MessageContent::Text {
+                    text: "Just text, no tools".to_string(),
+                }],
+                stop_reason: Some("end_turn".to_string()),
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(get_pending_tool_name(&entries), None);
     }
 
     #[test]
     fn test_get_pending_tool_name_all_completed() {
         // Tool has a result, so not pending
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::ToolUse {
-                            id: "toolu_123".to_string(),
-                            name: "Bash".to_string(),
-                            input: serde_json::json!({"command": "ls"}),
-                        },
-                        MessageContent::ToolResult {
-                            tool_use_id: "toolu_123".to_string(),
-                            content: "file1.txt\nfile2.txt".to_string(),
-                            is_error: Some(false),
-                        }
-                    ],
-                    stop_reason: Some("end_turn".to_string()),
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![
+                    MessageContent::ToolUse {
+                        id: "toolu_123".to_string(),
+                        name: "Bash".to_string(),
+                        input: serde_json::json!({"command": "ls"}),
+                    },
+                    MessageContent::ToolResult {
+                        tool_use_id: "toolu_123".to_string(),
+                        content: "file1.txt\nfile2.txt".to_string(),
+                        is_error: Some(false),
+                    },
+                ],
+                stop_reason: Some("end_turn".to_string()),
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(get_pending_tool_name(&entries), None);
     }
 
@@ -929,47 +887,43 @@ mod tests {
     fn test_get_pending_tool_name_multiple_tools_first_needs_permission() {
         // First tool (Bash) needs permission, second (Read) auto-approved
         // Should return the first one that needs permission
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::ToolUse {
-                            id: "toolu_123".to_string(),
-                            name: "Bash".to_string(),
-                            input: serde_json::json!({"command": "make build"}),
-                        },
-                        MessageContent::ToolUse {
-                            id: "toolu_456".to_string(),
-                            name: "Read".to_string(),
-                            input: serde_json::json!({"file_path": "/test/file.txt"}),
-                        }
-                    ],
-                    stop_reason: Some("tool_use".to_string()),
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![
+                    MessageContent::ToolUse {
+                        id: "toolu_123".to_string(),
+                        name: "Bash".to_string(),
+                        input: serde_json::json!({"command": "make build"}),
+                    },
+                    MessageContent::ToolUse {
+                        id: "toolu_456".to_string(),
+                        name: "Read".to_string(),
+                        input: serde_json::json!({"file_path": "/test/file.txt"}),
+                    },
+                ],
+                stop_reason: Some("tool_use".to_string()),
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(get_pending_tool_name(&entries), Some("Bash".to_string()));
     }
 
     #[test]
     fn test_get_pending_tool_name_no_assistant_message() {
         // Only user message, no assistant message
-        let entries = vec![
-            SessionEntry::User {
-                base: create_base(),
-                message: UserMessage {
-                    role: "user".to_string(),
-                    content: "Hello".to_string(),
-                    is_tool_result: false,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::User {
+            base: create_base(),
+            message: UserMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+                is_tool_result: false,
+            },
+        }];
         assert_eq!(get_pending_tool_name(&entries), None);
     }
 
@@ -983,36 +937,34 @@ mod tests {
     #[test]
     fn test_get_pending_tool_name_mixed_completed_and_pending() {
         // First tool completed, second tool needs permission
-        let entries = vec![
-            SessionEntry::Assistant {
-                base: create_base(),
-                message: AssistantMessage {
-                    model: "claude-opus-4-5-20251101".to_string(),
-                    id: "msg_test".to_string(),
-                    role: "assistant".to_string(),
-                    content: vec![
-                        MessageContent::ToolUse {
-                            id: "toolu_123".to_string(),
-                            name: "Read".to_string(),
-                            input: serde_json::json!({"file_path": "/test/file.txt"}),
-                        },
-                        MessageContent::ToolResult {
-                            tool_use_id: "toolu_123".to_string(),
-                            content: "file content".to_string(),
-                            is_error: Some(false),
-                        },
-                        MessageContent::ToolUse {
-                            id: "toolu_456".to_string(),
-                            name: "Bash".to_string(),
-                            input: serde_json::json!({"command": "npm install"}),
-                        }
-                    ],
-                    stop_reason: Some("tool_use".to_string()),
-                    stop_sequence: None,
-                    usage: None,
-                },
-            }
-        ];
+        let entries = vec![SessionEntry::Assistant {
+            base: create_base(),
+            message: AssistantMessage {
+                model: "claude-opus-4-5-20251101".to_string(),
+                id: "msg_test".to_string(),
+                role: "assistant".to_string(),
+                content: vec![
+                    MessageContent::ToolUse {
+                        id: "toolu_123".to_string(),
+                        name: "Read".to_string(),
+                        input: serde_json::json!({"file_path": "/test/file.txt"}),
+                    },
+                    MessageContent::ToolResult {
+                        tool_use_id: "toolu_123".to_string(),
+                        content: "file content".to_string(),
+                        is_error: Some(false),
+                    },
+                    MessageContent::ToolUse {
+                        id: "toolu_456".to_string(),
+                        name: "Bash".to_string(),
+                        input: serde_json::json!({"command": "rm -rf /important"}),
+                    },
+                ],
+                stop_reason: Some("tool_use".to_string()),
+                stop_sequence: None,
+                usage: None,
+            },
+        }];
         assert_eq!(get_pending_tool_name(&entries), Some("Bash".to_string()));
     }
 }
