@@ -133,6 +133,20 @@ pub fn start_polling(app: AppHandle) {
     });
 }
 
+/// Checks if a file was modified within the last N seconds
+fn is_file_recently_modified(path: &Path, seconds: u64) -> bool {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .map(|modified| {
+            modified
+                .elapsed()
+                .map(|elapsed| elapsed.as_secs() < seconds)
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+}
+
 /// Detect sessions and enrich them with status and conversation data
 pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
     let mut detector = SessionDetector::new()
@@ -220,7 +234,17 @@ pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
         let status = if entries.is_empty() {
             SessionStatus::Connecting
         } else {
-            determine_status(&entries)
+            let raw_status = determine_status(&entries);
+            // Override WaitingForInput if the JSONL file was recently modified
+            // This catches progress entries (bash_progress, thinking updates) that
+            // don't get parsed as meaningful entries but indicate active work
+            if raw_status == SessionStatus::WaitingForInput
+                && is_file_recently_modified(&session_file_path, 8)
+            {
+                SessionStatus::Working
+            } else {
+                raw_status
+            }
         };
 
         let latest_message = get_latest_message_from_entries(&entries);
