@@ -14,7 +14,7 @@ pub struct Permissions {
 }
 
 /// Cached permissions for quick lookup
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PermissionChecker {
     allowed_patterns: Vec<AllowPattern>,
 }
@@ -61,7 +61,10 @@ impl PermissionChecker {
             .and_then(|p| p.allow)
             .unwrap_or_default();
 
-        let patterns = allowed.iter().filter_map(|s| Self::parse_pattern(s)).collect();
+        let patterns = allowed
+            .iter()
+            .filter_map(|s| Self::parse_pattern(s))
+            .collect();
 
         Self {
             allowed_patterns: patterns,
@@ -81,10 +84,9 @@ impl PermissionChecker {
             let inner = &pattern[5..pattern.len() - 1];
 
             // Check for wildcard
-            if inner.ends_with(":*") {
-                let prefix = inner[..inner.len() - 2].to_string();
+            if let Some(stripped) = inner.strip_suffix(":*") {
                 Some(AllowPattern::Bash {
-                    prefix,
+                    prefix: stripped.to_string(),
                     wildcard: true,
                 })
             } else {
@@ -123,8 +125,8 @@ impl PermissionChecker {
     pub fn is_auto_approved(&self, tool_name: &str, tool_input: &serde_json::Value) -> bool {
         // These tools are always auto-approved (read-only operations)
         match tool_name {
-            "Read" | "Glob" | "Grep" | "WebFetch" | "WebSearch" | "Task" | "TaskList" |
-            "TaskGet" | "TaskCreate" | "TaskUpdate" | "AskUserQuestion" => {
+            "Read" | "Glob" | "Grep" | "WebFetch" | "WebSearch" | "Task" | "TaskList"
+            | "TaskGet" | "TaskCreate" | "TaskUpdate" | "AskUserQuestion" => {
                 return true;
             }
             _ => {}
@@ -203,14 +205,6 @@ impl PermissionChecker {
     }
 }
 
-impl Default for PermissionChecker {
-    fn default() -> Self {
-        Self {
-            allowed_patterns: Vec::new(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,19 +212,25 @@ mod tests {
     #[test]
     fn test_parse_bash_pattern_with_wildcard() {
         let pattern = PermissionChecker::parse_pattern("Bash(git add:*)");
-        assert!(matches!(pattern, Some(AllowPattern::Bash { prefix, wildcard: true }) if prefix == "git add"));
+        assert!(
+            matches!(pattern, Some(AllowPattern::Bash { prefix, wildcard: true }) if prefix == "git add")
+        );
     }
 
     #[test]
     fn test_parse_bash_pattern_exact() {
         let pattern = PermissionChecker::parse_pattern("Bash(npm ci)");
-        assert!(matches!(pattern, Some(AllowPattern::Bash { prefix, wildcard: false }) if prefix == "npm ci"));
+        assert!(
+            matches!(pattern, Some(AllowPattern::Bash { prefix, wildcard: false }) if prefix == "npm ci")
+        );
     }
 
     #[test]
     fn test_parse_mcp_pattern() {
         let pattern = PermissionChecker::parse_pattern("mcp__atlassian__getJiraIssue");
-        assert!(matches!(pattern, Some(AllowPattern::Mcp { name }) if name == "mcp__atlassian__getJiraIssue"));
+        assert!(
+            matches!(pattern, Some(AllowPattern::Mcp { name }) if name == "mcp__atlassian__getJiraIssue")
+        );
     }
 
     #[test]
@@ -258,16 +258,10 @@ mod tests {
         };
 
         // Should match git add with wildcard
-        assert!(checker.is_auto_approved(
-            "Bash",
-            &serde_json::json!({"command": "git add ."})
-        ));
+        assert!(checker.is_auto_approved("Bash", &serde_json::json!({"command": "git add ."})));
 
         // Should match exact npm ci
-        assert!(checker.is_auto_approved(
-            "Bash",
-            &serde_json::json!({"command": "npm ci"})
-        ));
+        assert!(checker.is_auto_approved("Bash", &serde_json::json!({"command": "npm ci"})));
 
         // Should NOT match npm ci with arguments (exact match required)
         assert!(!checker.is_auto_approved(
@@ -276,10 +270,7 @@ mod tests {
         ));
 
         // Should NOT match random command
-        assert!(!checker.is_auto_approved(
-            "Bash",
-            &serde_json::json!({"command": "rm -rf /"})
-        ));
+        assert!(!checker.is_auto_approved("Bash", &serde_json::json!({"command": "rm -rf /"})));
     }
 
     #[test]

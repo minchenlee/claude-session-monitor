@@ -4,8 +4,8 @@ pub mod session;
 
 use actions::{open_session as open_session_action, stop_session as stop_session_action};
 use polling::{detect_and_enrich_sessions, start_polling, Session};
-use session::{extract_messages, parse_all_entries, MessageType};
 use serde::Serialize;
+use session::{extract_messages, parse_all_entries, MessageType};
 use std::time::Duration;
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -70,7 +70,10 @@ async fn get_conversation(session_id: String) -> Result<Conversation, String> {
         }
     }
 
-    Err(format!("Session {} not found in any project directory", session_id))
+    Err(format!(
+        "Session {} not found in any project directory",
+        session_id
+    ))
 }
 
 /// Stop a session by process ID
@@ -98,7 +101,11 @@ async fn open_session(pid: u32, project_path: String) -> Result<(), String> {
 
 /// Rename a session title
 #[tauri::command]
-async fn rename_session(app: AppHandle, session_id: String, new_name: String) -> Result<(), String> {
+async fn rename_session(
+    app: AppHandle,
+    session_id: String,
+    new_name: String,
+) -> Result<(), String> {
     let mut custom_titles = session::CustomTitles::load();
     custom_titles.set(session_id, new_name);
     custom_titles.save()?;

@@ -68,7 +68,8 @@ pub fn start_polling(app: AppHandle) {
                             if is_first_cycle {
                                 // First cycle: seed the map without notifications
                                 for session in &sessions {
-                                    prev_status_map.insert(session.id.clone(), session.status.clone());
+                                    prev_status_map
+                                        .insert(session.id.clone(), session.status.clone());
                                 }
                                 is_first_cycle = false;
                             } else {
@@ -76,28 +77,38 @@ pub fn start_polling(app: AppHandle) {
                                 for session in &sessions {
                                     if let Some(prev_status) = prev_status_map.get(&session.id) {
                                         // Check for notification-worthy transitions
-                                        let should_notify = match (prev_status, &session.status) {
-                                            (SessionStatus::Working, SessionStatus::NeedsPermission) => true,
-                                            (SessionStatus::Working, SessionStatus::WaitingForInput) => true,
-                                            _ => false,
-                                        };
+                                        let should_notify = matches!(
+                                            (prev_status, &session.status),
+                                            (
+                                                SessionStatus::Working,
+                                                SessionStatus::NeedsPermission
+                                            ) | (
+                                                SessionStatus::Working,
+                                                SessionStatus::WaitingForInput
+                                            )
+                                        );
 
                                         if should_notify {
                                             fire_notification(
                                                 &app_handle,
-                                                &session.id,
-                                                &session.first_prompt,
-                                                &session.session_name,
-                                                &session.status,
-                                                session.pending_tool_name.as_deref(),
-                                                session.pid,
-                                                &session.project_path,
+                                                NotificationParams {
+                                                    session_id: &session.id,
+                                                    first_prompt: &session.first_prompt,
+                                                    session_name: &session.session_name,
+                                                    status: &session.status,
+                                                    pending_tool_name: session
+                                                        .pending_tool_name
+                                                        .as_deref(),
+                                                    pid: session.pid,
+                                                    project_path: &session.project_path,
+                                                },
                                             );
                                         }
                                     }
 
                                     // Update the status map
-                                    prev_status_map.insert(session.id.clone(), session.status.clone());
+                                    prev_status_map
+                                        .insert(session.id.clone(), session.status.clone());
                                 }
                             }
 
@@ -149,8 +160,8 @@ fn is_file_recently_modified(path: &Path, seconds: u64) -> bool {
 
 /// Detect sessions and enrich them with status and conversation data
 pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
-    let mut detector = SessionDetector::new()
-        .map_err(|e| format!("Failed to create session detector: {}", e))?;
+    let mut detector =
+        SessionDetector::new().map_err(|e| format!("Failed to create session detector: {}", e))?;
 
     let detected_sessions = detector
         .detect_sessions()
@@ -181,9 +192,12 @@ pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
         let sessions_index = parse_sessions_index(&index_path).ok();
 
         // Find the matching entry in the index (if index exists)
-        let session_entry = sessions_index
-            .as_ref()
-            .and_then(|index| index.entries.iter().find(|entry| entry.session_id == session_id));
+        let session_entry = sessions_index.as_ref().and_then(|index| {
+            index
+                .entries
+                .iter()
+                .find(|entry| entry.session_id == session_id)
+        });
 
         let (first_prompt, summary, message_count, modified, git_branch) = match session_entry {
             Some(entry) => (
@@ -290,24 +304,22 @@ fn get_first_prompt_from_jsonl(path: &Path) -> Option<String> {
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
 
-    for line in reader.lines().take(50) {
-        if let Ok(line) = line {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
-                // Check if this is a user message
-                if value.get("type").and_then(|t| t.as_str()) == Some("user") {
-                    // Try to get the message content
-                    if let Some(message) = value.get("message") {
-                        if let Some(content) = message.get("content") {
-                            // Content can be a string or array
-                            if let Some(text) = content.as_str() {
-                                return Some(truncate_string(text, 100));
-                            } else if let Some(arr) = content.as_array() {
-                                // Find the first text block
-                                for item in arr {
-                                    if item.get("type").and_then(|t| t.as_str()) == Some("text") {
-                                        if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
-                                            return Some(truncate_string(text, 100));
-                                        }
+    for line in reader.lines().take(50).flatten() {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+            // Check if this is a user message
+            if value.get("type").and_then(|t| t.as_str()) == Some("user") {
+                // Try to get the message content
+                if let Some(message) = value.get("message") {
+                    if let Some(content) = message.get("content") {
+                        // Content can be a string or array
+                        if let Some(text) = content.as_str() {
+                            return Some(truncate_string(text, 100));
+                        } else if let Some(arr) = content.as_array() {
+                            // Find the first text block
+                            for item in arr {
+                                if item.get("type").and_then(|t| t.as_str()) == Some("text") {
+                                    if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+                                        return Some(truncate_string(text, 100));
                                     }
                                 }
                             }
@@ -381,7 +393,7 @@ fn count_messages_in_jsonl(path: &Path) -> u32 {
     let reader = BufReader::new(file);
     let mut count = 0u32;
 
-    for line in reader.lines().flatten() {
+    for line in reader.lines().map_while(Result::ok) {
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
             if let Some(msg_type) = value.get("type").and_then(|t| t.as_str()) {
                 if msg_type == "user" || msg_type == "assistant" {
@@ -392,6 +404,18 @@ fn count_messages_in_jsonl(path: &Path) -> u32 {
     }
 
     count
+}
+
+/// Parameters for firing a notification
+#[derive(Debug, Clone)]
+struct NotificationParams<'a> {
+    session_id: &'a str,
+    first_prompt: &'a str,
+    session_name: &'a str,
+    status: &'a SessionStatus,
+    pending_tool_name: Option<&'a str>,
+    pid: u32,
+    project_path: &'a str,
 }
 
 /// Notification metadata for click-to-focus
@@ -406,34 +430,28 @@ struct NotificationMetadata {
 }
 
 /// Fire a notification for a status transition
-fn fire_notification(
-    app_handle: &AppHandle,
-    session_id: &str,
-    first_prompt: &str,
-    session_name: &str,
-    status: &SessionStatus,
-    pending_tool_name: Option<&str>,
-    pid: u32,
-    project_path: &str,
-) {
+fn fire_notification(app_handle: &AppHandle, params: NotificationParams) {
     // Truncate title to 60 characters
-    let title = truncate_string(first_prompt, 60);
+    let title = truncate_string(params.first_prompt, 60);
 
     // Build the body based on the status
-    let body = match status {
+    let body = match params.status {
         SessionStatus::NeedsPermission => {
-            let tool_name = pending_tool_name.unwrap_or("unknown tool");
-            format!("{}: Needs permission for {}", session_name, tool_name)
+            let tool_name = params.pending_tool_name.unwrap_or("unknown tool");
+            format!(
+                "{}: Needs permission for {}",
+                params.session_name, tool_name
+            )
         }
         SessionStatus::WaitingForInput => {
-            format!("{}: Finished working", session_name)
+            format!("{}: Finished working", params.session_name)
         }
         _ => return, // Should not happen based on the caller's logic
     };
 
     // Generate a stable i32 ID from the session_id string using hash
     let mut hasher = DefaultHasher::new();
-    session_id.hash(&mut hasher);
+    params.session_id.hash(&mut hasher);
     let notification_id = (hasher.finish() as i32).abs();
 
     // Fire native notification via Tauri plugin
@@ -451,9 +469,9 @@ fn fire_notification(
     // Emit event with session metadata for click-to-focus handling
     let metadata = NotificationMetadata {
         notification_id,
-        session_id: session_id.to_string(),
-        pid,
-        project_path: project_path.to_string(),
+        session_id: params.session_id.to_string(),
+        pid: params.pid,
+        project_path: params.project_path.to_string(),
         title: title.clone(),
     };
 
