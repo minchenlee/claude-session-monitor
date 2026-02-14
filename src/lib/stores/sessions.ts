@@ -9,6 +9,7 @@ import type { Session, Conversation } from '../types';
 import { SessionStatus } from '../types';
 import { isDemoMode } from '../demo';
 import { openSession } from '../api';
+import { wsClient, useWebSocket, getStoredWsUrl, isTauri } from '../ws';
 
 /**
  * Store containing all active sessions
@@ -31,6 +32,30 @@ export const currentConversation = writable<Conversation | null>(null);
 export const notificationPermission = writable<'granted' | 'denied' | 'default'>('default');
 
 /**
+ * In-app toast notifications (for web clients without Notification API)
+ */
+export interface InAppNotification {
+	id: number;
+	title: string;
+	body: string;
+}
+export const inAppNotifications = writable<InAppNotification[]>([]);
+let notifCounter = 0;
+
+export function showInAppNotification(title: string, body: string) {
+	const id = ++notifCounter;
+	inAppNotifications.update((list) => [...list, { id, title, body }]);
+	// Flash page title
+	const originalTitle = document.title;
+	document.title = `🔔 ${title}`;
+	setTimeout(() => { document.title = originalTitle; }, 3000);
+	// Auto-dismiss after 5s
+	setTimeout(() => {
+		inAppNotifications.update((list) => list.filter((n) => n.id !== id));
+	}, 5000);
+}
+
+/**
  * Derived store: sessions sorted by attention priority
  * Priority: NeedsPermission > WaitingForInput > Working > Connecting
  */
@@ -48,7 +73,6 @@ export const sortedSessions = derived(sessions, ($sessions) => {
 		if (priorityA !== priorityB) {
 			return priorityA - priorityB;
 		}
-		// Same priority: sort by most recent activity (newest at bottom)
 		return new Date(a.modified).getTime() - new Date(b.modified).getTime();
 	});
 });
@@ -66,9 +90,15 @@ export const attentionCount = derived(sessions, ($sessions) => {
  * Derived store: status summary for header
  */
 export const statusSummary = derived(sessions, ($sessions) => {
-	const working = $sessions.filter((s) => s.status === SessionStatus.Working || s.status === SessionStatus.Connecting).length;
-	const permission = $sessions.filter((s) => s.status === SessionStatus.NeedsPermission).length;
-	const input = $sessions.filter((s) => s.status === SessionStatus.WaitingForInput).length;
+	const working = $sessions.filter(
+		(s) => s.status === SessionStatus.Working || s.status === SessionStatus.Connecting
+	).length;
+	const permission = $sessions.filter(
+		(s) => s.status === SessionStatus.NeedsPermission
+	).length;
+	const input = $sessions.filter(
+		(s) => s.status === SessionStatus.WaitingForInput
+	).length;
 
 	return { working, permission, input };
 });
@@ -84,39 +114,67 @@ interface NotificationMetadata {
 	title: string;
 }
 
-/**
- * Map of notification ID to metadata for click-to-focus
- * When a notification is clicked, we look up the metadata by notification.id
- */
 const notificationMetadataMap = new Map<number, NotificationMetadata>();
 const MAX_NOTIFICATION_ENTRIES = 10;
 
 /**
- * Initialize event listeners for backend updates
- * Call this once when the app starts
+ * Initialize event listeners for backend updates.
+ * Automatically chooses Tauri IPC events or WebSocket depending on environment.
  */
 export async function initializeSessionListeners() {
-	// Listen for session updates from the backend polling loop
+	if (useWebSocket()) {
+		await initWebSocketListeners();
+	} else {
+		await initTauriListeners();
+	}
+}
+
+// ── WebSocket mode ──────────────────────────────────────────────────
+
+async function initWebSocketListeners() {
+	const wsUrl = getStoredWsUrl();
+	if (!wsUrl) {
+		console.warn('[ws] No server URL configured');
+		return;
+	}
+
+	try {
+		await wsClient.connect(wsUrl);
+	} catch (e) {
+		console.error('[ws] Failed to connect:', e);
+		return;
+	}
+
+	wsClient.on('sessionsUpdated', (data: Session[]) => {
+		if (!get(isDemoMode)) {
+			sessions.set(data);
+		}
+	});
+
+	wsClient.on('notification', (data: { title: string; body: string; sessionId: string; pid: number }) => {
+		if (get(isDemoMode)) return;
+		showInAppNotification(data.title, data.body);
+	});
+}
+
+// ── Tauri IPC mode ──────────────────────────────────────────────────
+
+async function initTauriListeners() {
 	await listen<Session[]>('sessions-updated', (event) => {
 		if (!get(isDemoMode)) {
 			sessions.set(event.payload);
 		}
 	});
 
-	// Listen for conversation updates
 	await listen<Conversation>('conversation-updated', (event) => {
 		currentConversation.set(event.payload);
 	});
 
-	// Listen for notification-fired events to track metadata for click-to-focus
 	await listen<NotificationMetadata>('notification-fired', (event) => {
 		if (!get(isDemoMode)) {
 			const metadata = event.payload;
-
-			// Store in map keyed by notification ID
 			notificationMetadataMap.set(metadata.notificationId, metadata);
 
-			// Keep only the most recent N notifications (remove oldest entries)
 			while (notificationMetadataMap.size > MAX_NOTIFICATION_ENTRIES) {
 				const firstKey = notificationMetadataMap.keys().next().value;
 				if (firstKey !== undefined) {
@@ -125,43 +183,46 @@ export async function initializeSessionListeners() {
 			}
 		}
 	});
-
-	// Note: onNotificationReceived is not supported in Tauri v2 for macOS
-	// Click-to-focus functionality would need to be implemented differently
-	// For now, notifications will show but clicking won't focus the window
-	// TODO: Investigate alternative approaches for notification click handling on macOS
 }
 
 /**
  * Check if notification permission is granted
- * Updates the notificationPermission store
  */
 export async function checkNotificationPermission() {
-	try {
-		const granted = await isPermissionGranted();
-		notificationPermission.set(granted ? 'granted' : 'default');
-		return granted;
-	} catch (error) {
-		console.error('[notification] Failed to check permission:', error);
-		notificationPermission.set('default');
-		return false;
+	if (isTauri()) {
+		try {
+			const granted = await isPermissionGranted();
+			notificationPermission.set(granted ? 'granted' : 'default');
+			return granted;
+		} catch (error) {
+			console.error('[notification] Failed to check permission:', error);
+			notificationPermission.set('default');
+			return false;
+		}
 	}
+	// Web: in-app notifications always available (no permission needed)
+	notificationPermission.set('granted');
+	return true;
 }
 
 /**
  * Request notification permission from the user
- * Updates the notificationPermission store with the result
  */
 export async function requestNotificationPermission() {
-	try {
-		const permission = await requestPermission();
-		notificationPermission.set(permission);
-		return permission === 'granted';
-	} catch (error) {
-		console.error('[notification] Failed to request permission:', error);
-		notificationPermission.set('denied');
-		return false;
+	if (isTauri()) {
+		try {
+			const permission = await requestPermission();
+			notificationPermission.set(permission);
+			return permission === 'granted';
+		} catch (error) {
+			console.error('[notification] Failed to request permission:', error);
+			notificationPermission.set('denied');
+			return false;
+		}
 	}
+	// Web: in-app notifications always available
+	notificationPermission.set('granted');
+	return true;
 }
 
 // Legacy alias for backward compatibility

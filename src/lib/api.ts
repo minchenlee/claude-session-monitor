@@ -1,5 +1,6 @@
 /**
- * API wrapper for Tauri backend commands
+ * API wrapper — automatically dispatches to Tauri IPC or WebSocket
+ * depending on the runtime environment.
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -7,48 +8,83 @@ import { get } from 'svelte/store';
 import type { Session, Conversation } from './types';
 import { isDemoMode } from './demo';
 import { getDemoSessions, demoConversations } from './demo/data';
+import { wsClient, useWebSocket } from './ws';
 
 /**
  * Get all active Claude Code sessions
- * @returns Promise resolving to array of sessions
  */
 export async function getSessions(): Promise<Session[]> {
-  if (get(isDemoMode)) {
-    return getDemoSessions();
-  }
-  return await invoke<Session[]>('get_sessions');
+	if (get(isDemoMode)) return getDemoSessions();
+
+	if (useWebSocket()) {
+		return await wsClient.request<Session[]>('getSessions');
+	}
+	return await invoke<Session[]>('get_sessions');
 }
 
 /**
  * Get the full conversation history for a specific session
- * @param sessionId - The session UUID
- * @returns Promise resolving to the conversation
  */
 export async function getConversation(sessionId: string): Promise<Conversation> {
-  if (get(isDemoMode)) {
-    return demoConversations[sessionId] ?? { sessionId, messages: [] };
-  }
-  return await invoke<Conversation>('get_conversation', { sessionId });
+	if (get(isDemoMode)) {
+		return demoConversations[sessionId] ?? { sessionId, messages: [] };
+	}
+
+	if (useWebSocket()) {
+		return await wsClient.request<Conversation>('getConversation', { sessionId });
+	}
+	return await invoke<Conversation>('get_conversation', { sessionId });
 }
 
 /**
  * Stop a running session by sending SIGTERM
- * @param pid - The process ID of the Claude session
- * @returns Promise resolving when the stop signal has been sent
  */
 export async function stopSession(pid: number): Promise<void> {
-  if (get(isDemoMode)) return;
-  await invoke<void>('stop_session', { pid });
+	if (get(isDemoMode)) return;
+
+	if (useWebSocket()) {
+		await wsClient.request('stopSession', { pid });
+		return;
+	}
+	await invoke<void>('stop_session', { pid });
 }
 
 /**
  * Open the terminal or IDE window for a session
- * @param pid - The process ID of the Claude session
- * @param projectPath - The project path for window matching
- * @returns Promise resolving when the window has been opened/focused
  */
 export async function openSession(pid: number, projectPath: string): Promise<void> {
-  if (get(isDemoMode)) return;
-  await invoke<void>('open_session', { pid, projectPath });
+	if (get(isDemoMode)) return;
+
+	if (useWebSocket()) {
+		await wsClient.request('openSession', { pid, projectPath });
+		return;
+	}
+	await invoke<void>('open_session', { pid, projectPath });
 }
 
+/**
+ * Rename a session title
+ */
+export async function renameSession(sessionId: string, newName: string): Promise<void> {
+	if (get(isDemoMode)) return;
+
+	if (useWebSocket()) {
+		await wsClient.request('renameSession', { sessionId, newName });
+		return;
+	}
+	await invoke<void>('rename_session', { sessionId, newName });
+}
+
+/**
+ * Server connection info (desktop/Tauri only)
+ */
+export interface ServerInfo {
+	token: string;
+	port: number;
+	localIp: string;
+	wsUrl: string;
+}
+
+export async function getServerInfo(): Promise<ServerInfo> {
+	return await invoke<ServerInfo>('get_server_info');
+}

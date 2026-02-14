@@ -44,8 +44,7 @@ pub struct SessionDetector {
 impl SessionDetector {
     /// Creates a new SessionDetector
     pub fn new() -> Result<Self, SessionDetectorError> {
-        let home_dir = dirs::home_dir()
-            .ok_or(SessionDetectorError::HomeDirectoryNotFound)?;
+        let home_dir = dirs::home_dir().ok_or(SessionDetectorError::HomeDirectoryNotFound)?;
 
         let claude_projects_dir = home_dir.join(".claude").join("projects");
 
@@ -86,7 +85,14 @@ impl SessionDetector {
     ) -> Vec<DetectedSession> {
         // Collect all session files with their modification times and project path
         // Tuple: (modified_time, jsonl_path, project_dir, project_path, project_name, has_reliable_path)
-        let mut session_files: Vec<(std::time::SystemTime, PathBuf, PathBuf, PathBuf, String, bool)> = Vec::new();
+        let mut session_files: Vec<(
+            std::time::SystemTime,
+            PathBuf,
+            PathBuf,
+            PathBuf,
+            String,
+            bool,
+        )> = Vec::new();
 
         for project_dir in project_dirs {
             if let Ok(entries) = fs::read_dir(project_dir) {
@@ -94,9 +100,7 @@ impl SessionDetector {
                     let path = entry.path();
 
                     // Check if it's a JSONL file (UUID format, not subagent files)
-                    if path.is_file()
-                        && path.extension().map_or(false, |ext| ext == "jsonl")
-                    {
+                    if path.is_file() && path.extension().map_or(false, |ext| ext == "jsonl") {
                         // Skip files that don't look like UUIDs (e.g., agent-*.jsonl)
                         if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                             if stem.starts_with("agent-") {
@@ -107,31 +111,37 @@ impl SessionDetector {
                         if let Ok(metadata) = fs::metadata(&path) {
                             if let Ok(modified) = metadata.modified() {
                                 // Get session ID and project info
-                                if let Some(session_id) = path.file_stem()
+                                if let Some(session_id) = path
+                                    .file_stem()
                                     .and_then(|s| s.to_str())
                                     .map(|s| s.to_string())
                                 {
                                     // Try to get project info from sessions-index.json
                                     // This is the ONLY reliable source of project path
-                                    let (project_path, project_name, has_reliable_path) =
-                                        match self.get_project_info_from_index(project_dir, &session_id) {
-                                            Some((path, name)) => (path, name, true),
-                                            None => {
-                                                // No reliable path available - use directory name as display only
-                                                // Don't try to decode it (decoding is ambiguous due to dashes)
-                                                let dir_name = project_dir
-                                                    .file_name()
-                                                    .and_then(|n| n.to_str())
-                                                    .unwrap_or("unknown");
+                                    let (project_path, project_name, has_reliable_path) = match self
+                                        .get_project_info_from_index(project_dir, &session_id)
+                                    {
+                                        Some((path, name)) => (path, name, true),
+                                        None => {
+                                            // No reliable path available - use directory name as display only
+                                            // Don't try to decode it (decoding is ambiguous due to dashes)
+                                            let dir_name = project_dir
+                                                .file_name()
+                                                .and_then(|n| n.to_str())
+                                                .unwrap_or("unknown");
 
-                                                // Just use the last segment after splitting on dash as a rough name
-                                                // This is for display only, not for matching
-                                                let name = dir_name.rsplit('-').next().unwrap_or("unknown").to_string();
+                                            // Just use the last segment after splitting on dash as a rough name
+                                            // This is for display only, not for matching
+                                            let name = dir_name
+                                                .rsplit('-')
+                                                .next()
+                                                .unwrap_or("unknown")
+                                                .to_string();
 
-                                                // Use the project_dir as a placeholder (will use fallback PID assignment)
-                                                (project_dir.clone(), name, false)
-                                            }
-                                        };
+                                            // Use the project_dir as a placeholder (will use fallback PID assignment)
+                                            (project_dir.clone(), name, false)
+                                        }
+                                    };
 
                                     session_files.push((
                                         modified,
@@ -155,7 +165,8 @@ impl SessionDetector {
         // Process-centric approach: for each process, find its matching session
         // This ensures we only show sessions that have actual running processes
         let mut sessions = Vec::new();
-        let mut used_session_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut used_session_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
 
         // Sort processes by start_time (newest first) to match newest processes first
         let mut sorted_processes: Vec<&ClaudeProcess> = processes.iter().collect();
@@ -172,25 +183,25 @@ impl SessionDetector {
             let encoded_cwd = cwd_str.replace('/', "-").replace('_', "-");
 
             // Helper closure to check if a session matches the process path
-            let path_matches = |project_dir: &Path, project_path: &Path, has_reliable_path: bool| -> bool {
-                let dir_name = project_dir
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("");
+            let path_matches =
+                |project_dir: &Path, project_path: &Path, has_reliable_path: bool| -> bool {
+                    let dir_name = project_dir
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("");
 
-                // Method 1: Direct path comparison (exact or subdirectory match)
-                let direct_match = if has_reliable_path {
-                    proc_cwd == project_path
-                        || proc_cwd.starts_with(project_path)
-                } else {
-                    false
+                    // Method 1: Direct path comparison (exact or subdirectory match)
+                    let direct_match = if has_reliable_path {
+                        proc_cwd == project_path || proc_cwd.starts_with(project_path)
+                    } else {
+                        false
+                    };
+
+                    // Method 2: Encoded path comparison
+                    let encoded_match = dir_name == encoded_cwd;
+
+                    direct_match || encoded_match
                 };
-
-                // Method 2: Encoded path comparison
-                let encoded_match = dir_name == encoded_cwd;
-
-                direct_match || encoded_match
-            };
 
             // Helper closure to check if session is not already used
             let session_available = |path: &Path| -> bool {
@@ -204,26 +215,31 @@ impl SessionDetector {
             // Only match sessions that were modified AFTER the process started
             // This prevents matching a new Claude instance (with no session file yet)
             // to an older session from the same project directory
-            let matching_session = session_files.iter().find(|(modified, path, project_dir, project_path, _, has_reliable_path)| {
-                if !session_available(path) {
-                    return false;
-                }
-
-                // Check if the session was modified after the process started
-                let session_active_after_proc_start = match modified.duration_since(std::time::UNIX_EPOCH) {
-                    Ok(duration) => {
-                        let session_modified_secs = duration.as_secs();
-                        // Session must have been modified at or after process start (with 5s buffer)
-                        session_modified_secs + 5 >= proc.start_time
+            let matching_session = session_files.iter().find(
+                |(modified, path, project_dir, project_path, _, has_reliable_path)| {
+                    if !session_available(path) {
+                        return false;
                     }
-                    Err(_) => false,
-                };
 
-                session_active_after_proc_start && path_matches(project_dir, project_path, *has_reliable_path)
-            });
+                    // Check if the session was modified after the process started
+                    let session_active_after_proc_start =
+                        match modified.duration_since(std::time::UNIX_EPOCH) {
+                            Ok(duration) => {
+                                let session_modified_secs = duration.as_secs();
+                                // Session must have been modified at or after process start (with 5s buffer)
+                                session_modified_secs + 5 >= proc.start_time
+                            }
+                            Err(_) => false,
+                        };
+
+                    session_active_after_proc_start
+                        && path_matches(project_dir, project_path, *has_reliable_path)
+                },
+            );
 
             if let Some((_, path, project_dir, _, project_name, _)) = matching_session {
-                if let Some(session_id) = path.file_stem()
+                if let Some(session_id) = path
+                    .file_stem()
                     .and_then(|s| s.to_str())
                     .map(|s| s.to_string())
                 {
@@ -335,7 +351,6 @@ impl SessionDetector {
 
         Ok(project_dirs)
     }
-
 }
 
 impl Default for SessionDetector {

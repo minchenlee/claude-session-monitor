@@ -20,7 +20,8 @@
     "@tauri-apps/plugin-updater": "^2.10.0",
     "dompurify": "^3.3.1",
     "geist": "^1.7.0",
-    "marked": "^17.0.1"
+    "marked": "^17.0.1",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",
@@ -29,6 +30,7 @@
     "@tauri-apps/cli": "^2",
     "@types/dompurify": "^3.0.5",
     "@types/marked": "^5.0.2",
+    "@types/qrcode": "^1.5.6",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "typescript": "~5.6.2",

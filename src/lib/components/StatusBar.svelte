@@ -249,9 +249,28 @@
 		height: 100%;
 		pointer-events: none;
 		opacity: 0.05;
-		background-image: 
+		background-image:
 			radial-gradient(var(--text-muted) 1px, transparent 1px);
 		background-size: 4px 4px;
+	}
+
+	/* ── Mobile Responsive ─────────────────────────────────────── */
+	@media (max-width: 768px) {
+		.system-status-bar {
+			padding: var(--space-md);
+		}
+
+		.legend {
+			gap: var(--space-md);
+		}
+
+		.legend-item .label {
+			font-size: 11px;
+		}
+
+		.legend-item .count {
+			font-size: 13px;
+		}
 	}
 
 </style>

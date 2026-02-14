@@ -42,7 +42,12 @@ pub struct Session {
 /// 2. Enriches them with status information
 /// 3. Tracks status transitions and fires notifications
 /// 4. Emits "sessions-updated" events to the frontend
-pub fn start_polling(app: AppHandle) {
+/// 5. Broadcasts session data to WebSocket clients
+pub fn start_polling(
+    app: AppHandle,
+    sessions_tx: tokio::sync::broadcast::Sender<String>,
+    notifications_tx: tokio::sync::broadcast::Sender<String>,
+) {
     thread::spawn(move || {
         let app_handle = Arc::new(app);
         let poll_interval = Duration::from_secs(2);
@@ -68,7 +73,8 @@ pub fn start_polling(app: AppHandle) {
                             if is_first_cycle {
                                 // First cycle: seed the map without notifications
                                 for session in &sessions {
-                                    prev_status_map.insert(session.id.clone(), session.status.clone());
+                                    prev_status_map
+                                        .insert(session.id.clone(), session.status.clone());
                                 }
                                 is_first_cycle = false;
                             } else {
@@ -77,14 +83,21 @@ pub fn start_polling(app: AppHandle) {
                                     if let Some(prev_status) = prev_status_map.get(&session.id) {
                                         // Check for notification-worthy transitions
                                         let should_notify = match (prev_status, &session.status) {
-                                            (SessionStatus::Working, SessionStatus::NeedsPermission) => true,
-                                            (SessionStatus::Working, SessionStatus::WaitingForInput) => true,
+                                            (
+                                                SessionStatus::Working,
+                                                SessionStatus::NeedsPermission,
+                                            ) => true,
+                                            (
+                                                SessionStatus::Working,
+                                                SessionStatus::WaitingForInput,
+                                            ) => true,
                                             _ => false,
                                         };
 
                                         if should_notify {
                                             fire_notification(
                                                 &app_handle,
+                                                &notifications_tx,
                                                 &session.id,
                                                 &session.first_prompt,
                                                 &session.session_name,
@@ -97,7 +110,8 @@ pub fn start_polling(app: AppHandle) {
                                     }
 
                                     // Update the status map
-                                    prev_status_map.insert(session.id.clone(), session.status.clone());
+                                    prev_status_map
+                                        .insert(session.id.clone(), session.status.clone());
                                 }
                             }
 
@@ -117,9 +131,14 @@ pub fn start_polling(app: AppHandle) {
                         }
                     }
 
-                    // Emit event to frontend
+                    // Emit event to Tauri frontend
                     if let Err(e) = app_handle.emit("sessions-updated", &sessions) {
                         eprintln!("Failed to emit sessions-updated event: {}", e);
+                    }
+
+                    // Broadcast to WebSocket clients
+                    if let Ok(json) = serde_json::to_string(&sessions) {
+                        let _ = sessions_tx.send(json);
                     }
                 }
                 Err(e) => {
@@ -135,8 +154,8 @@ pub fn start_polling(app: AppHandle) {
 
 /// Detect sessions and enrich them with status and conversation data
 pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
-    let mut detector = SessionDetector::new()
-        .map_err(|e| format!("Failed to create session detector: {}", e))?;
+    let mut detector =
+        SessionDetector::new().map_err(|e| format!("Failed to create session detector: {}", e))?;
 
     let detected_sessions = detector
         .detect_sessions()
@@ -167,9 +186,12 @@ pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
         let sessions_index = parse_sessions_index(&index_path).ok();
 
         // Find the matching entry in the index (if index exists)
-        let session_entry = sessions_index
-            .as_ref()
-            .and_then(|index| index.entries.iter().find(|entry| entry.session_id == session_id));
+        let session_entry = sessions_index.as_ref().and_then(|index| {
+            index
+                .entries
+                .iter()
+                .find(|entry| entry.session_id == session_id)
+        });
 
         let (first_prompt, summary, message_count, modified, git_branch) = match session_entry {
             Some(entry) => (
@@ -281,7 +303,9 @@ fn get_first_prompt_from_jsonl(path: &Path) -> Option<String> {
                                 // Find the first text block
                                 for item in arr {
                                     if item.get("type").and_then(|t| t.as_str()) == Some("text") {
-                                        if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+                                        if let Some(text) =
+                                            item.get("text").and_then(|t| t.as_str())
+                                        {
                                             return Some(truncate_string(text, 100));
                                         }
                                     }
@@ -384,6 +408,7 @@ struct NotificationMetadata {
 /// Fire a notification for a status transition
 fn fire_notification(
     app_handle: &AppHandle,
+    notifications_tx: &tokio::sync::broadcast::Sender<String>,
     session_id: &str,
     first_prompt: &str,
     session_name: &str,
@@ -435,6 +460,17 @@ fn fire_notification(
 
     if let Err(e) = app_handle.emit("notification-fired", &metadata) {
         eprintln!("Failed to emit notification-fired event: {}", e);
+    }
+
+    // Broadcast to WebSocket clients for web notifications
+    let ws_notification = serde_json::json!({
+        "title": title,
+        "body": body,
+        "sessionId": session_id,
+        "pid": pid,
+    });
+    if let Ok(json) = serde_json::to_string(&ws_notification) {
+        let _ = notifications_tx.send(json);
     }
 }
 
