@@ -483,10 +483,10 @@ fn fire_notification(
     let body = match status {
         SessionStatus::NeedsPermission => {
             let tool_name = pending_tool_name.unwrap_or("unknown tool");
-            format!("{}: Needs permission for {}", session_name, tool_name)
+            format!("🔐 {}: Needs permission for {}", session_name, tool_name)
         }
         SessionStatus::WaitingForInput => {
-            format!("{}: Finished working", session_name)
+            format!("✅ {}: Finished working", session_name)
         }
         _ => return, // Should not happen based on the caller's logic
     };

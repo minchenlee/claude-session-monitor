@@ -8,8 +8,7 @@
 		sortedSessions,
 		expandedSessionId,
 		currentConversation,
-		statusSummary,
-		checkNotificationPermission
+		statusSummary
 	} from '$lib/stores/sessions';
 	import { getConversation, stopSession, openSession } from '$lib/api';
 	import { isDemoMode, toggleDemoMode } from '$lib/demo';
@@ -17,7 +16,6 @@
 	import StatusBar from '$lib/components/StatusBar.svelte';
 	import SessionCard from '$lib/components/SessionCard.svelte';
 	import ExpandedCardOverlay from '$lib/components/ExpandedCardOverlay.svelte';
-	import NotificationPermissionBanner from '$lib/components/NotificationPermissionBanner.svelte';
 	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
 	import QRCodeModal from '$lib/components/QRCodeModal.svelte';
 	import ConnectionScreen from '$lib/components/ConnectionScreen.svelte';
@@ -48,8 +46,6 @@
 			if (savedCompact === 'true') {
 				isCompact = true;
 			}
-
-			checkNotificationPermission();
 		}
 	});
 
@@ -318,9 +314,6 @@
 					</div>
 				{/if}
 			</section>
-
-			<!-- Notification Permission Banner -->
-			<NotificationPermissionBanner />
 
 			{#if sessions.length === 0}
 				<div class="empty-state">
