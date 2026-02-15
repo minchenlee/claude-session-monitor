@@ -214,4 +214,26 @@
 	.nav-list::-webkit-scrollbar-thumb {
 		background: var(--border-default);
 	}
+
+	/* ── Mobile: inside bottom sheet ─────────────────────────── */
+	@media (max-width: 768px) {
+		.nav-map-floating {
+			width: 100%;
+			height: 100%;
+			border: none;
+			padding: 0 0 var(--space-lg);
+		}
+
+		.nav-header {
+			margin: 0 var(--space-md);
+		}
+
+		.nav-item-descriptive {
+			padding: 8px var(--space-md);
+		}
+
+		.nav-text {
+			font-size: 14px;
+		}
+	}
 </style>

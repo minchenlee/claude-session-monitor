@@ -17,11 +17,17 @@
 
 	let { session, conversation, onclose, onstop, onopen }: Props = $props();
 
-	let messagesContainer: HTMLDivElement;
+	let messagesContainer = $state<HTMLDivElement>(undefined!);
 	let isInitialLoad = $state(true);
 	let hasScrolledToBottom = $state(false);
 	let showTools = $state(true);
 	let showThinking = $state(true);
+	let navSheetOpen = $state(false);
+
+	function handleNavItemClick() {
+		// Close the bottom sheet on mobile after navigating
+		navSheetOpen = false;
+	}
 
 	onMount(() => {
 		isInitialLoad = false;
@@ -221,9 +227,37 @@
 				{/if}
 			</div>
 
+			<!-- Mobile: FAB to open nav sheet -->
+			<button
+				type="button"
+				class="nav-fab"
+				class:open={navSheetOpen}
+				onclick={() => navSheetOpen = !navSheetOpen}
+				title="Navigation"
+			>
+				<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<line x1="3" y1="6" x2="21" y2="6" />
+					<line x1="3" y1="12" x2="21" y2="12" />
+					<line x1="3" y1="18" x2="21" y2="18" />
+				</svg>
+			</button>
 		</div>
 
-		<div class="nav-map-side" in:scale={{ start: 0.95, duration: 300, easing: quintOut }}>
+		<!-- Desktop: sidebar nav -->
+		<div class="nav-map-side nav-desktop" in:scale={{ start: 0.95, duration: 300, easing: quintOut }}>
+			<MessageNavMap {conversation} scrollContainer={messagesContainer} bind:showTools bind:showThinking />
+		</div>
+
+		<!-- Mobile: bottom sheet nav -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="nav-sheet-backdrop" class:open={navSheetOpen} onclick={() => navSheetOpen = false}></div>
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="nav-sheet" class:open={navSheetOpen} onclick={handleNavItemClick}>
+			<div class="nav-sheet-handle">
+				<div class="handle-bar"></div>
+			</div>
 			<MessageNavMap {conversation} scrollContainer={messagesContainer} bind:showTools bind:showThinking />
 		</div>
 	</div>
@@ -265,12 +299,19 @@
 		box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
 	}
 
-	.nav-map-side {
+	.nav-map-side.nav-desktop {
 		flex-shrink: 0;
 		height: 100%;
 		display: flex;
 		flex-direction: column;
-		pointer-events: auto; /* Enable clicks on the nav map */
+		pointer-events: auto;
+	}
+
+	/* Mobile bottom sheet elements — hidden on desktop */
+	.nav-fab,
+	.nav-sheet-backdrop,
+	.nav-sheet {
+		display: none;
 	}
 
 	/* Header */
@@ -286,23 +327,6 @@
 		display: flex;
 		align-items: center;
 		gap: var(--space-md);
-	}
-
-	.status-indicator {
-		position: relative;
-		width: 8px;
-		height: 8px;
-		flex-shrink: 0;
-	}
-
-	.status-dot {
-		width: 100%;
-		height: 100%;
-		background: var(--status-color);
-	}
-
-	.status-ring {
-		display: none;
 	}
 
 	.header-info {
@@ -473,6 +497,155 @@
 		color: var(--text-muted);
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
+	}
+
+	/* ── Mobile Responsive ─────────────────────────────────────── */
+	@media (max-width: 768px) {
+		.overlay-backdrop {
+			padding: 0;
+		}
+
+		.overlay-layout {
+			max-width: 100%;
+			height: 100vh;
+			max-height: 100vh;
+		}
+
+		/* Hide the desktop sidebar nav on mobile */
+		.nav-map-side.nav-desktop {
+			display: none;
+		}
+
+		.overlay-card {
+			border: none;
+			box-shadow: none;
+		}
+
+		.overlay-header {
+			padding: var(--space-md) var(--space-md);
+			gap: var(--space-sm);
+		}
+
+		.header-left {
+			min-width: 0;
+			flex: 1;
+		}
+
+		.project-name {
+			font-size: 13px;
+			max-width: none;
+		}
+
+		.header-meta {
+			flex-wrap: wrap;
+			font-size: 11px;
+			gap: var(--space-xs);
+		}
+
+		.header-actions {
+			flex-shrink: 0;
+		}
+
+		.header-divider {
+			display: none;
+		}
+
+		.header-button {
+			width: 28px;
+			height: 28px;
+		}
+
+		.close-button {
+			width: 28px;
+			height: 28px;
+		}
+
+		.conversation-area {
+			padding: var(--space-md);
+			padding-bottom: 72px; /* Space for FAB */
+		}
+
+		/* ── FAB (Floating Action Button) ────────────── */
+		.nav-fab {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			position: fixed;
+			bottom: 20px;
+			right: 20px;
+			width: 48px;
+			height: 48px;
+			background: var(--bg-card);
+			border: 1px solid var(--border-default);
+			color: var(--text-secondary);
+			z-index: 1010;
+			pointer-events: auto;
+			box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+			transition: all 0.2s ease;
+		}
+
+		.nav-fab:active {
+			transform: scale(0.95);
+		}
+
+		.nav-fab.open {
+			background: var(--text-primary);
+			color: var(--bg-base);
+			border-color: var(--text-primary);
+		}
+
+		/* ── Bottom Sheet Backdrop ────────────────────── */
+		.nav-sheet-backdrop {
+			display: block;
+			position: fixed;
+			inset: 0;
+			background: rgba(0, 0, 0, 0.5);
+			z-index: 1020;
+			pointer-events: none;
+			opacity: 0;
+			transition: opacity 0.25s ease;
+		}
+
+		.nav-sheet-backdrop.open {
+			pointer-events: auto;
+			opacity: 1;
+		}
+
+		/* ── Bottom Sheet ─────────────────────────────── */
+		.nav-sheet {
+			display: flex;
+			flex-direction: column;
+			position: fixed;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			height: 55vh;
+			background: var(--bg-card);
+			border-top: 1px solid var(--border-default);
+			z-index: 1030;
+			pointer-events: auto;
+			transform: translateY(100%);
+			transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+			overflow: hidden;
+		}
+
+		.nav-sheet.open {
+			transform: translateY(0);
+		}
+
+		.nav-sheet-handle {
+			display: flex;
+			justify-content: center;
+			padding: var(--space-md) 0 var(--space-sm);
+			flex-shrink: 0;
+		}
+
+		.handle-bar {
+			width: 36px;
+			height: 4px;
+			background: var(--border-default);
+			border-radius: 2px;
+		}
 	}
 
 </style>

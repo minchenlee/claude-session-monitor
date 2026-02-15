@@ -13,14 +13,21 @@
 	} from '$lib/stores/sessions';
 	import { getConversation, stopSession, openSession } from '$lib/api';
 	import { isDemoMode, toggleDemoMode } from '$lib/demo';
+	import { isTauri } from '$lib/ws';
 	import StatusBar from '$lib/components/StatusBar.svelte';
 	import SessionCard from '$lib/components/SessionCard.svelte';
 	import ExpandedCardOverlay from '$lib/components/ExpandedCardOverlay.svelte';
 	import NotificationPermissionBanner from '$lib/components/NotificationPermissionBanner.svelte';
+	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
+	import QRCodeModal from '$lib/components/QRCodeModal.svelte';
+	import ConnectionScreen from '$lib/components/ConnectionScreen.svelte';
 	import type { Session } from '$lib/types';
 	import { SessionStatus } from '$lib/types';
 
 	let demoActive = $derived($isDemoMode);
+	let showQRModal = $state(false);
+
+	let needsConnection = $state(!isTauri());
 
 	let sessions = $derived($sortedSessions);
 	let summary = $derived($statusSummary);
@@ -28,21 +35,6 @@
 	let conversation = $derived($currentConversation);
 
 	let viewMode = $state<'project' | 'all'>('project');
-
-	onMount(() => {
-		if (browser) {
-			const saved = localStorage.getItem('sessionViewMode');
-			if (saved === 'project' || saved === 'all') {
-				viewMode = saved;
-			}
-		}
-	});
-
-	$effect(() => {
-		if (browser) {
-			localStorage.setItem('sessionViewMode', viewMode);
-		}
-	});
 
 	let isCompact = $state(false);
 
@@ -57,7 +49,6 @@
 				isCompact = true;
 			}
 
-			// Check notification permission on app start
 			checkNotificationPermission();
 		}
 	});
@@ -202,6 +193,9 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
+		const tag = (e.target as HTMLElement)?.tagName;
+		if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
 		if (e.key === 'd' && (e.metaKey || e.ctrlKey)) {
 			e.preventDefault();
 			toggleDemoMode();
@@ -231,6 +225,9 @@
 
 <svelte:window on:keydown={handleKeydown} />
 
+{#if needsConnection}
+	<ConnectionScreen onconnected={() => (needsConnection = false)} />
+{:else}
 <div class="dashboard">
 	<div class="window-drag-handle" data-tauri-drag-region></div>
 
@@ -254,6 +251,19 @@
 						</svg>
 						<span class="demo-label">DEMO</span>
 					</button>
+					{#if isTauri()}
+						<button
+							class="toggle-btn mobile-connect-btn"
+							onclick={() => (showQRModal = true)}
+							title="Connect Mobile Device"
+						>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+								<line x1="12" y1="18" x2="12.01" y2="18" />
+							</svg>
+							<span class="mobile-label">MOBILE</span>
+						</button>
+					{/if}
 					<div class="header-spacer"></div>
 					<div class="view-toggle">
 						<button
@@ -471,7 +481,13 @@
 		/>
 	{/if}
 
+	{#if showQRModal}
+		<QRCodeModal onclose={() => (showQRModal = false)} />
+	{/if}
+
+	<ToastNotifications />
 </div>
+{/if}
 
 <style>
 	.dashboard {
@@ -794,6 +810,25 @@
 		letter-spacing: 0.05em;
 	}
 
+	.mobile-connect-btn {
+		width: auto;
+		padding: 0 var(--space-sm);
+		gap: var(--space-xs);
+		color: var(--accent-blue);
+	}
+
+	.mobile-connect-btn:hover {
+		color: var(--accent-blue);
+		background: rgba(0, 112, 243, 0.1);
+	}
+
+	.mobile-label {
+		font-family: var(--font-pixel);
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.05em;
+	}
+
 	.demo-badge {
 		font-family: var(--font-mono);
 		font-size: 10px;
@@ -816,5 +851,68 @@
 
 	.empty-header-row :global(.status-bar) {
 		flex: 1;
+	}
+
+	/* ── Mobile Responsive ─────────────────────────────────────── */
+	@media (max-width: 768px) {
+		.window-drag-handle {
+			height: 0;
+			display: none;
+		}
+
+		.grid-container {
+			padding: var(--space-md);
+		}
+
+		.sections-container {
+			gap: var(--space-xl);
+		}
+
+		.project-header {
+			flex-wrap: wrap;
+			gap: var(--space-sm);
+		}
+
+		.project-name {
+			font-size: 16px;
+		}
+
+		.project-count {
+			font-size: 14px;
+		}
+
+		/* Stack status groups vertically on mobile */
+		.status-groups {
+			flex-direction: column;
+			overflow-x: visible;
+			padding-bottom: 0;
+		}
+
+		.status-group {
+			min-width: 0;
+			max-width: 100%;
+		}
+
+		/* Single column grid */
+		.all-sessions-grid {
+			grid-template-columns: 1fr;
+		}
+
+		.all-sessions-grid.compact {
+			grid-template-columns: 1fr;
+		}
+
+		.view-toggle {
+			padding: 1px;
+		}
+
+		.toggle-btn {
+			width: 32px;
+			height: 32px;
+		}
+
+		.demo-toggle {
+			padding: 0 var(--space-xs);
+		}
 	}
 </style>

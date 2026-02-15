@@ -14,7 +14,10 @@ pub fn open_session(pid: u32, project_path: String) -> Result<(), String> {
         .and_then(|n| n.to_str())
         .unwrap_or("");
 
-    eprintln!("[open_session] App: {}, Project: {}, Path: {}", app_name, project_name, project_path);
+    eprintln!(
+        "[open_session] App: {}, Project: {}, Path: {}",
+        app_name, project_name, project_path
+    );
 
     // iTerm2: use tty matching to focus the correct tab (macOS only)
     #[cfg(target_os = "macos")]
@@ -24,21 +27,23 @@ pub fn open_session(pid: u32, project_path: String) -> Result<(), String> {
 
     // Try to use app-specific CLI to open/focus the correct window
     if let Some(cli_path) = get_app_cli(&app_name) {
-        eprintln!("[open_session] Using CLI: {} to open: {}", cli_path, project_path);
+        eprintln!(
+            "[open_session] Using CLI: {} to open: {}",
+            cli_path, project_path
+        );
 
         // VS Code family uses -r flag to reuse window, -g to not open new if exists
-        let output = if app_name == "Visual Studio Code" || app_name == "Cursor" || app_name == "Windsurf" {
-            Command::new(&cli_path)
-                .arg("-r")  // Reuse existing window
-                .arg("-g")  // Don't grab focus for new file (but we want focus)
-                .arg(&project_path)
-                .output()
-        } else {
-            // Zed and others just take the path
-            Command::new(&cli_path)
-                .arg(&project_path)
-                .output()
-        };
+        let output =
+            if app_name == "Visual Studio Code" || app_name == "Cursor" || app_name == "Windsurf" {
+                Command::new(&cli_path)
+                    .arg("-r") // Reuse existing window
+                    .arg("-g") // Don't grab focus for new file (but we want focus)
+                    .arg(&project_path)
+                    .output()
+            } else {
+                // Zed and others just take the path
+                Command::new(&cli_path).arg(&project_path).output()
+            };
 
         match output {
             Ok(out) => {
@@ -219,10 +224,16 @@ fn activate_app_fallback(app_name: &str) -> Result<(), String> {
     match output {
         Ok(out) => {
             if out.status.success() {
-                eprintln!("[open_session] xdotool activated window for: {}", search_name);
+                eprintln!(
+                    "[open_session] xdotool activated window for: {}",
+                    search_name
+                );
                 return Ok(());
             }
-            eprintln!("[open_session] xdotool failed, window not found for: {}", search_name);
+            eprintln!(
+                "[open_session] xdotool failed, window not found for: {}",
+                search_name
+            );
         }
         Err(_) => {
             eprintln!("[open_session] xdotool not available");
@@ -242,19 +253,28 @@ fn activate_app_fallback(_app_name: &str) -> Result<(), String> {
 fn get_app_cli(app_name: &str) -> Option<String> {
     let cli_paths: &[(&str, &[&str])] = &[
         ("Zed", &["/Applications/Zed.app/Contents/MacOS/cli"]),
-        ("Visual Studio Code", &[
-            "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
-            "/usr/local/bin/code",
-        ]),
-        ("Cursor", &[
-            "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
-            "/Applications/Cursor.app/Contents/Resources/app/bin/code",
-            "/usr/local/bin/cursor",
-        ]),
-        ("Windsurf", &[
-            "/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf",
-            "/Applications/Windsurf.app/Contents/Resources/app/bin/code",
-        ]),
+        (
+            "Visual Studio Code",
+            &[
+                "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+                "/usr/local/bin/code",
+            ],
+        ),
+        (
+            "Cursor",
+            &[
+                "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+                "/Applications/Cursor.app/Contents/Resources/app/bin/code",
+                "/usr/local/bin/cursor",
+            ],
+        ),
+        (
+            "Windsurf",
+            &[
+                "/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf",
+                "/Applications/Windsurf.app/Contents/Resources/app/bin/code",
+            ],
+        ),
     ];
 
     for (name, paths) in cli_paths {
@@ -274,28 +294,20 @@ fn get_app_cli(app_name: &str) -> Option<String> {
 #[cfg(target_os = "linux")]
 fn get_app_cli(app_name: &str) -> Option<String> {
     let cli_paths: &[(&str, &[&str])] = &[
-        ("Zed", &[
-            "/usr/bin/zed",
-            "/usr/local/bin/zed",
-        ]),
-        ("Visual Studio Code", &[
-            "/usr/bin/code",
-            "/usr/local/bin/code",
-            "/snap/bin/code",
-        ]),
-        ("Cursor", &[
-            "/usr/bin/cursor",
-            "/usr/local/bin/cursor",
-        ]),
-        ("Windsurf", &[
-            "/usr/bin/windsurf",
-            "/usr/local/bin/windsurf",
-        ]),
-        ("Sublime Text", &[
-            "/usr/bin/subl",
-            "/usr/local/bin/subl",
-            "/snap/bin/subl",
-        ]),
+        ("Zed", &["/usr/bin/zed", "/usr/local/bin/zed"]),
+        (
+            "Visual Studio Code",
+            &["/usr/bin/code", "/usr/local/bin/code", "/snap/bin/code"],
+        ),
+        ("Cursor", &["/usr/bin/cursor", "/usr/local/bin/cursor"]),
+        (
+            "Windsurf",
+            &["/usr/bin/windsurf", "/usr/local/bin/windsurf"],
+        ),
+        (
+            "Sublime Text",
+            &["/usr/bin/subl", "/usr/local/bin/subl", "/snap/bin/subl"],
+        ),
     ];
 
     for (name, paths) in cli_paths {
@@ -354,8 +366,13 @@ fn find_parent_app(pid: u32) -> Result<String, String> {
             .output()
             .map_err(|e| format!("Failed to execute ps: {}", e))?;
 
-        let comm = String::from_utf8_lossy(&comm_output.stdout).trim().to_string();
-        eprintln!("[open_session] Step {}: PID {} -> comm: {}", i, current_pid, comm);
+        let comm = String::from_utf8_lossy(&comm_output.stdout)
+            .trim()
+            .to_string();
+        eprintln!(
+            "[open_session] Step {}: PID {} -> comm: {}",
+            i, current_pid, comm
+        );
 
         // Check if this is a known GUI application
         if let Some(app_name) = get_app_name(&comm) {
@@ -372,7 +389,9 @@ fn find_parent_app(pid: u32) -> Result<String, String> {
             .output()
             .map_err(|e| format!("Failed to execute ps: {}", e))?;
 
-        let ppid_str = String::from_utf8_lossy(&ppid_output.stdout).trim().to_string();
+        let ppid_str = String::from_utf8_lossy(&ppid_output.stdout)
+            .trim()
+            .to_string();
         let ppid: u32 = ppid_str.parse().unwrap_or(1);
         eprintln!("[open_session] Parent PID: {}", ppid);
 

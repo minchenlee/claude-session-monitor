@@ -4,23 +4,25 @@
 	import { getSessions } from '$lib/api';
 	import { loadDemoDataIfActive } from '$lib/demo';
 	import { checkForUpdates } from '$lib/updater';
+	import { isTauri } from '$lib/ws';
 	import '../app.css';
 
 	onMount(async () => {
 		// If demo mode was persisted, load demo data and skip real fetch
 		const demoActive = loadDemoDataIfActive();
 
-		// Initialize Tauri event listeners for real-time updates
-		await initializeSessionListeners();
+		// Desktop (Tauri): initialize listeners and fetch sessions here
+		// Browser/mobile: ConnectionScreen handles initialization after user connects
+		if (isTauri()) {
+			await initializeSessionListeners();
 
-		if (!demoActive) {
-			// Fetch initial session data and update store
-			const initialSessions = await getSessions();
-			sessions.set(initialSessions);
+			if (!demoActive) {
+				const initialSessions = await getSessions();
+				sessions.set(initialSessions);
+			}
+
+			checkForUpdates();
 		}
-
-		// Check for updates in the background (non-blocking)
-		checkForUpdates();
 	});
 </script>
 

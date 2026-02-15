@@ -364,16 +364,6 @@
 		color: var(--text-primary);
 	}
 
-	.action-btn.approve {
-		border-color: var(--status-permission);
-		color: var(--status-permission);
-	}
-
-	.action-btn.approve:hover {
-		background: var(--status-permission);
-		color: var(--bg-base);
-	}
-
 	.popover-footer {
 		padding: var(--space-sm) var(--space-lg);
 		border-top: 1px solid var(--border-default);

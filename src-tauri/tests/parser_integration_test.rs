@@ -1,5 +1,5 @@
 use c9watch_lib::session::{
-    parse_sessions_index, parse_last_n_entries, extract_messages, MessageType,
+    extract_messages, parse_last_n_entries, parse_sessions_index, MessageType,
 };
 use std::env;
 use std::path::PathBuf;
@@ -19,16 +19,26 @@ fn test_parse_real_sessions_index() {
         .join(".claude/projects/-Users-vincent-m-lee--claude/sessions-index.json");
 
     if !index_path.exists() {
-        println!("Sessions index not found at {:?}, skipping test", index_path);
+        println!(
+            "Sessions index not found at {:?}, skipping test",
+            index_path
+        );
         return;
     }
 
     let result = parse_sessions_index(&index_path);
-    assert!(result.is_ok(), "Failed to parse sessions-index.json: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse sessions-index.json: {:?}",
+        result.err()
+    );
 
     let index = result.unwrap();
     assert_eq!(index.version, 1);
-    assert!(!index.entries.is_empty(), "Sessions index should have entries");
+    assert!(
+        !index.entries.is_empty(),
+        "Sessions index should have entries"
+    );
 
     println!("Successfully parsed {} sessions", index.entries.len());
 }
@@ -86,7 +96,11 @@ fn test_parse_real_jsonl_file() {
     for (timestamp, msg_type, content) in messages.iter().take(3) {
         assert!(!timestamp.is_empty(), "Timestamp should not be empty");
         assert!(!content.is_empty(), "Content should not be empty");
-        println!("Message type: {:?}, content length: {}", msg_type, content.len());
+        println!(
+            "Message type: {:?}, content length: {}",
+            msg_type,
+            content.len()
+        );
     }
 }
 
@@ -123,14 +137,25 @@ fn test_message_type_extraction() {
                 let messages = extract_messages(&entries);
 
                 // Count message types
-                let user_count = messages.iter().filter(|(_, t, _)| t == &MessageType::User).count();
-                let assistant_count = messages.iter().filter(|(_, t, _)| t == &MessageType::Assistant).count();
+                let user_count = messages
+                    .iter()
+                    .filter(|(_, t, _)| t == &MessageType::User)
+                    .count();
+                let assistant_count = messages
+                    .iter()
+                    .filter(|(_, t, _)| t == &MessageType::Assistant)
+                    .count();
 
-                println!("Session {}: {} user messages, {} assistant messages",
-                    entry.session_id, user_count, assistant_count);
+                println!(
+                    "Session {}: {} user messages, {} assistant messages",
+                    entry.session_id, user_count, assistant_count
+                );
 
                 // There should be at least some messages
-                assert!(messages.len() > 0, "Should have extracted at least one message");
+                assert!(
+                    messages.len() > 0,
+                    "Should have extracted at least one message"
+                );
             }
             Err(e) => {
                 println!("Could not parse session {}: {}", entry.session_id, e);

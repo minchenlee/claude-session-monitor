@@ -343,3 +343,17 @@ input, textarea, select {
 	background: var(--bg-card);
 	border: 1px solid var(--border-default);
 }
+
+/* ── Mobile Responsive ─────────────────────────────────────────────── */
+@media (max-width: 768px) {
+	body {
+		font-size: 13px;
+	}
+
+	/* Larger touch targets */
+	button,
+	[role="button"] {
+		min-height: 36px;
+		min-width: 36px;
+	}
+}
