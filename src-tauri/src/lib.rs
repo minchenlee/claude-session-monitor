@@ -277,6 +277,7 @@ pub fn run() {
             stop_session,
             open_session,
             rename_session,
+            get_terminal_title,
             show_main_window,
             get_server_info
         ]);
