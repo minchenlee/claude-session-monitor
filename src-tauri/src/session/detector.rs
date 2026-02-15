@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use sysinfo::{ProcessesToUpdate, System};
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -49,15 +49,27 @@ impl SessionDetector {
         let claude_projects_dir = home_dir.join(".claude").join("projects");
 
         Ok(Self {
-            system: System::new_all(),
+            system: System::new_with_specifics(
+                RefreshKind::new().with_processes(
+                    ProcessRefreshKind::new()
+                        .with_exe(UpdateKind::OnlyIfNotSet)
+                        .with_cwd(UpdateKind::OnlyIfNotSet)
+                ),
+            ),
             claude_projects_dir,
         })
     }
 
     /// Detects all active Claude Code sessions
     pub fn detect_sessions(&mut self) -> Result<Vec<DetectedSession>, SessionDetectorError> {
-        // Refresh process information
-        self.system.refresh_processes(ProcessesToUpdate::All, true);
+        // Refresh process information (only what we need: name, cwd, start_time)
+        self.system.refresh_processes_specifics(
+            ProcessesToUpdate::All,
+            true,
+            ProcessRefreshKind::new()
+                .with_exe(UpdateKind::OnlyIfNotSet)
+                .with_cwd(UpdateKind::OnlyIfNotSet),
+        );
 
         // Find all running Claude processes
         let claude_processes = self.find_claude_processes();

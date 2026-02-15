@@ -50,7 +50,16 @@ pub fn start_polling(
 ) {
     thread::spawn(move || {
         let app_handle = Arc::new(app);
-        let poll_interval = Duration::from_secs(2);
+        let poll_interval = Duration::from_millis(3500);
+
+        // Create detector once and reuse across poll cycles
+        let mut detector = match SessionDetector::new() {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("[polling] Failed to create session detector: {}", e);
+                return;
+            }
+        };
 
         // Track previous status for each session
         let previous_status: Arc<Mutex<HashMap<String, SessionStatus>>> =
@@ -61,7 +70,7 @@ pub fn start_polling(
 
         loop {
             // Detect and enrich sessions
-            match detect_and_enrich_sessions() {
+            match detect_and_enrich_sessions_with_detector(&mut detector) {
                 Ok(sessions) => {
                     // Track current session IDs to clean up stale entries
                     let current_session_ids: HashSet<String> =
@@ -154,9 +163,13 @@ pub fn start_polling(
 
 /// Detect sessions and enrich them with status and conversation data
 pub fn detect_and_enrich_sessions() -> Result<Vec<Session>, String> {
-    let mut detector =
-        SessionDetector::new().map_err(|e| format!("Failed to create session detector: {}", e))?;
+    let mut detector = SessionDetector::new()
+        .map_err(|e| format!("Failed to create session detector: {}", e))?;
+    detect_and_enrich_sessions_with_detector(&mut detector)
+}
 
+/// Detect sessions using an existing detector (avoids recreating System each call)
+fn detect_and_enrich_sessions_with_detector(detector: &mut SessionDetector) -> Result<Vec<Session>, String> {
     let detected_sessions = detector
         .detect_sessions()
         .map_err(|e| format!("Failed to detect sessions: {}", e))?;
