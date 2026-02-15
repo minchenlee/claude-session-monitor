@@ -12,7 +12,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_notification::NotificationExt;
 
@@ -65,6 +65,12 @@ pub fn start_polling(
         let previous_status: Arc<Mutex<HashMap<String, SessionStatus>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
+        // Track last notification time per session to prevent duplicates.
+        // If status flickers (Working → Ready → Working → Ready), this cooldown
+        // ensures we don't fire the same notification twice within a short window.
+        let mut last_notification_time: HashMap<String, Instant> = HashMap::new();
+        let notification_cooldown = Duration::from_secs(30);
+
         // Track if this is the first poll cycle
         let mut is_first_cycle = true;
 
@@ -104,17 +110,28 @@ pub fn start_polling(
                                         };
 
                                         if should_notify {
-                                            fire_notification(
-                                                &app_handle,
-                                                &notifications_tx,
-                                                &session.id,
-                                                &session.first_prompt,
-                                                &session.session_name,
-                                                &session.status,
-                                                session.pending_tool_name.as_deref(),
-                                                session.pid,
-                                                &session.project_path,
-                                            );
+                                            // Check cooldown to prevent duplicate notifications
+                                            // from status flickering across poll cycles
+                                            let on_cooldown = last_notification_time
+                                                .get(&session.id)
+                                                .map(|t| t.elapsed() < notification_cooldown)
+                                                .unwrap_or(false);
+
+                                            if !on_cooldown {
+                                                fire_notification(
+                                                    &app_handle,
+                                                    &notifications_tx,
+                                                    &session.id,
+                                                    &session.first_prompt,
+                                                    &session.session_name,
+                                                    &session.status,
+                                                    session.pending_tool_name.as_deref(),
+                                                    session.pid,
+                                                    &session.project_path,
+                                                );
+                                                last_notification_time
+                                                    .insert(session.id.clone(), Instant::now());
+                                            }
                                         }
                                     }
 
@@ -126,6 +143,7 @@ pub fn start_polling(
 
                             // Clean up disappeared sessions
                             prev_status_map.retain(|id, _| current_session_ids.contains(id));
+                            last_notification_time.retain(|id, _| current_session_ids.contains(id));
                         }
                         Err(poisoned) => {
                             eprintln!("[polling] Mutex poisoned, recovering...");
@@ -159,6 +177,20 @@ pub fn start_polling(
             thread::sleep(poll_interval);
         }
     });
+}
+
+/// Checks if a file was modified within the last N seconds
+fn is_file_recently_modified(path: &Path, seconds: u64) -> bool {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .map(|modified| {
+            modified
+                .elapsed()
+                .map(|elapsed| elapsed.as_secs() < seconds)
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
 }
 
 /// Detect sessions and enrich them with status and conversation data
@@ -255,7 +287,21 @@ fn detect_and_enrich_sessions_with_detector(detector: &mut SessionDetector) -> R
         let status = if entries.is_empty() {
             SessionStatus::Connecting
         } else {
-            determine_status(&entries)
+            let raw_status = determine_status(&entries);
+            // Override WaitingForInput if the JSONL file was recently modified.
+            // This catches progress entries (bash_progress, thinking updates) that
+            // don't get parsed as meaningful entries but indicate active work.
+            //
+            // Why 8 seconds? Polling runs every 3.5s, Claude writes progress every 1-3s
+            // during active work. 8s provides buffer for gaps without delaying "Ready"
+            // transition when work truly finishes.
+            if raw_status == SessionStatus::WaitingForInput
+                && is_file_recently_modified(&session_file_path, 8)
+            {
+                SessionStatus::Working
+            } else {
+                raw_status
+            }
         };
 
         let latest_message = get_latest_message_from_entries(&entries);
