@@ -106,6 +106,8 @@ jobs:
       - name: Generate updater JSON manifest
         run: |
           VERSION="${{ github.ref_name }}"
+          # Strip 'v' prefix for semver compatibility (v0.2.0 -> 0.2.0)
+          VERSION_NO_V="${VERSION#v}"
           DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           # Read signatures if they exist
@@ -120,7 +122,7 @@ jobs:
 
           cat > artifacts/latest.json << MANIFEST
           {
-            "version": "${VERSION}",
+            "version": "${VERSION_NO_V}",
             "notes": "See the release notes on GitHub",
             "pub_date": "${DATE}",
             "platforms": {
