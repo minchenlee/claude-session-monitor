@@ -5,6 +5,7 @@
 	import { loadDemoDataIfActive } from '$lib/demo';
 	import { checkForUpdates } from '$lib/updater';
 	import { isTauri } from '$lib/ws';
+	import UpdateBanner from '$lib/components/UpdateBanner.svelte';
 	import '../app.css';
 
 	onMount(async () => {
@@ -27,3 +28,4 @@
 </script>
 
 <slot />
+<UpdateBanner />

@@ -7,7 +7,7 @@
     "core:default",
     "opener:default",
     "updater:default",
-    "updater:allow-check",
+    "process:allow-restart",
     "notification:default",
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
