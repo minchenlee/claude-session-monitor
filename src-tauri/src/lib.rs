@@ -28,17 +28,10 @@ use tauri::{
 };
 use tauri::{AppHandle, Manager};
 #[cfg(target_os = "macos")]
-#[allow(deprecated)]
-use cocoa::appkit::{NSWindow, NSWindowCollectionBehavior};
-#[cfg(target_os = "macos")]
-#[allow(deprecated)]
-use cocoa::base::id;
-#[cfg(target_os = "macos")]
-use objc::msg_send;
-#[cfg(target_os = "macos")]
-use objc::sel;
-#[cfg(target_os = "macos")]
-use objc::sel_impl;
+use tauri_nspanel::{
+    tauri_panel, CollectionBehavior, ManagerExt as PanelManagerExt, PanelLevel, StyleMask,
+    WebviewWindowExt as PanelExt,
+};
 
 // ── Shared types ────────────────────────────────────────────────────
 
@@ -182,6 +175,12 @@ async fn show_main_window(app: AppHandle) -> Result<(), String> {
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
 
+        // Hide popover panel on macOS, regular window on other platforms
+        #[cfg(target_os = "macos")]
+        if let Ok(panel) = app.get_webview_panel("popover") {
+            panel.hide();
+        }
+        #[cfg(not(target_os = "macos"))]
         if let Some(popover) = app.get_webview_window("popover") {
             let _ = popover.hide();
         }
@@ -211,6 +210,17 @@ async fn get_server_info(info: tauri::State<'_, ServerInfo>) -> Result<ServerInf
     })
 }
 
+// ── NSPanel definition for macOS popover ────────────────────────────
+#[cfg(target_os = "macos")]
+tauri_panel! {
+    panel!(PopoverPanel {
+        config: {
+            can_become_key_window: true,
+            is_floating_panel: true
+        }
+    })
+}
+
 // ── App entry point ─────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -222,8 +232,14 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_notification::init())
-        .setup(|app| {
+        .plugin(tauri_plugin_notification::init());
+
+    // macOS: NSPanel plugin for popover (must appear above fullscreen apps)
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+
+    #[cfg(not(mobile))]
+    let builder = builder.setup(|app| {
             // ── WebSocket server ────────────────────────────────
             let token = auth::generate_token();
             let local_ip = auth::get_local_ip();
@@ -259,33 +275,31 @@ pub fn run() {
             // ── Polling loop ────────────────────────────────────
             start_polling(app.handle().clone(), sessions_tx, notifications_tx);
 
-            // ── Popover window: set macOS window level and collection behavior ──
-            // Must be done at startup before the window is first shown.
-            // Level 25 = kCGStatusBarWindowLevel (same as the menu bar).
-            // CanJoinAllSpaces allows the popover to appear in fullscreen Spaces.
-            // Stationary prevents the window from animating during Space transitions.
+            // ── Popover panel: convert NSWindow to NSPanel for fullscreen support ──
+            // NSPanel can appear above fullscreen apps, unlike regular NSWindow.
             #[cfg(target_os = "macos")]
-            #[allow(deprecated)]
             if let Some(popover) = app.get_webview_window("popover") {
-                if let Ok(ptr) = popover.ns_window() {
-                    eprintln!("[c9watch] Setting popover NSWindow level and collection behavior");
-                    unsafe {
-                        let win = ptr as id;
-                        NSWindow::setLevel_(win, 25);
-                        NSWindow::setCollectionBehavior_(
-                            win,
-                            NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
-                                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary,
-                        );
-                        // Prevent macOS from auto-hiding this window when the app loses focus
-                        // (which happens when a fullscreen app is active)
-                        let _: () = msg_send![win, setHidesOnDeactivate: false];
-                    }
-                } else {
-                    eprintln!("[c9watch] Failed to get NSWindow pointer for popover");
-                }
-            } else {
-                eprintln!("[c9watch] Popover window not found during setup");
+                let panel = popover.to_panel::<PopoverPanel>().unwrap();
+
+                // Status level (25) = same as macOS menu bar
+                panel.set_level(PanelLevel::Status.value());
+
+                // NonactivatingPanel: won't steal focus from the fullscreen app
+                panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
+
+                // Allow in all Spaces including fullscreen
+                panel.set_collection_behavior(
+                    CollectionBehavior::new()
+                        .full_screen_auxiliary()
+                        .can_join_all_spaces()
+                        .stationary()
+                        .into(),
+                );
+
+                // Don't hide when app is deactivated (when fullscreen app is active)
+                panel.set_hides_on_deactivate(false);
+
+                eprintln!("[c9watch] Popover converted to NSPanel with fullscreen support");
             }
 
             // ── Tray icon ───────────────────────────────────────
@@ -302,46 +316,59 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        if let Some(popover) = app_handle.get_webview_window("popover") {
-                            if popover.is_visible().unwrap_or(false) {
-                                let _ = popover.hide();
-                            } else {
-                                let scale = popover
-                                    .current_monitor()
-                                    .ok()
-                                    .flatten()
-                                    .map(|m| m.scale_factor())
-                                    .unwrap_or(1.0);
+                        // Use NSPanel via tauri-nspanel on macOS for fullscreen support
+                        #[cfg(target_os = "macos")]
+                        {
+                            if let Ok(panel) = app_handle.get_webview_panel("popover") {
+                                if panel.is_visible() {
+                                    panel.hide();
+                                } else {
+                                    // Position below the tray icon, centered horizontally
+                                    if let Some(popover) = app_handle.get_webview_window("popover") {
+                                        let scale = popover
+                                            .current_monitor()
+                                            .ok()
+                                            .flatten()
+                                            .map(|m| m.scale_factor())
+                                            .unwrap_or(1.0);
 
-                                let pos = rect.position.to_physical::<f64>(scale);
-                                let size = rect.size.to_physical::<f64>(scale);
-                                let popover_physical_width = popover
-                                    .outer_size()
-                                    .map(|s| s.width as f64)
-                                    .unwrap_or(320.0 * scale);
+                                        let pos = rect.position.to_physical::<f64>(scale);
+                                        let size = rect.size.to_physical::<f64>(scale);
+                                        let popover_physical_width = popover
+                                            .outer_size()
+                                            .map(|s| s.width as f64)
+                                            .unwrap_or(320.0 * scale);
 
-                                let x = pos.x + (size.width / 2.0) - (popover_physical_width / 2.0);
-                                let y = pos.y + size.height + 4.0;
+                                        let x = pos.x + (size.width / 2.0) - (popover_physical_width / 2.0);
+                                        let y = pos.y + size.height + 4.0;
 
-                                let _ = popover.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
-                                let _ = popover.show();
-                                let _ = popover.set_focus();
-
-                                // Re-apply window level and force to front on every show.
-                                // Tauri's show()/hide() can reset the window level, and
-                                // orderFrontRegardless() forces visibility in the current Space
-                                // (including fullscreen Spaces).
-                                #[cfg(target_os = "macos")]
-                                #[allow(deprecated)]
-                                {
-                                    if let Ok(ptr) = popover.ns_window() {
-                                        unsafe {
-                                            let win = ptr as id;
-                                            NSWindow::setLevel_(win, 25);
-                                            let _: () = msg_send![win, setHidesOnDeactivate: false];
-                                            let _: () = msg_send![win, orderFrontRegardless];
-                                        }
+                                        let _ = popover.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
                                     }
+                                    panel.show_and_make_key();
+                                }
+                            }
+                        }
+
+                        // Non-macOS: use regular window
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            if let Some(popover) = app_handle.get_webview_window("popover") {
+                                if popover.is_visible().unwrap_or(false) {
+                                    let _ = popover.hide();
+                                } else {
+                                    let pos = rect.position.to_physical::<f64>(1.0);
+                                    let size = rect.size.to_physical::<f64>(1.0);
+                                    let popover_physical_width = popover
+                                        .outer_size()
+                                        .map(|s| s.width as f64)
+                                        .unwrap_or(320.0);
+
+                                    let x = pos.x + (size.width / 2.0) - (popover_physical_width / 2.0);
+                                    let y = pos.y + size.height + 4.0;
+
+                                    let _ = popover.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
+                                    let _ = popover.show();
+                                    let _ = popover.set_focus();
                                 }
                             }
                         }
