@@ -188,7 +188,7 @@
 	.dot {
 		width: 8px;
 		height: 8px;
-		border-radius: 50%;
+		border-radius: 0;
 		flex-shrink: 0;
 	}
 
@@ -265,7 +265,7 @@
 	.session-dot {
 		width: 6px;
 		height: 6px;
-		border-radius: 50%;
+		border-radius: 0;
 		flex-shrink: 0;
 	}
 
