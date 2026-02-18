@@ -267,12 +267,15 @@ pub fn run() {
                             } else {
                                 let pos = rect.position.to_physical::<f64>(1.0);
                                 let size = rect.size.to_physical::<f64>(1.0);
-                                let popover_width = 320.0_f64;
+                                let popover_physical_width = popover
+                                    .outer_size()
+                                    .map(|s| s.width as f64)
+                                    .unwrap_or(320.0);
 
-                                let x = pos.x + (size.width / 2.0) - (popover_width / 2.0);
+                                let x = pos.x + (size.width / 2.0) - (popover_physical_width / 2.0);
                                 let y = pos.y + size.height + 4.0;
 
-                                let _ = popover.set_position(PhysicalPosition::new(x as i32, y as i32));
+                                let _ = popover.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
                                 let _ = popover.show();
                                 let _ = popover.set_focus();
                             }
