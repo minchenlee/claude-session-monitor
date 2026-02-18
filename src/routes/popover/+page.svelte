@@ -17,6 +17,7 @@
 	onMount(() => {
 		let unlistenFocus: (() => void) | null = null;
 		let unlistenBlur: (() => void) | null = null;
+		let cancelled = false;
 
 		const init = async () => {
 			const demoActive = loadDemoDataIfActive();
@@ -31,8 +32,7 @@
 				}
 			}
 
-			// Refresh when popover becomes visible
-			unlistenFocus = await listen('tauri://focus', async () => {
+			const ul1 = await listen('tauri://focus', async () => {
 				if (get(isDemoMode)) return;
 				try {
 					const freshSessions = await getSessions();
@@ -42,18 +42,25 @@
 				}
 			});
 
-			// Hide popover when it loses focus (click-outside)
-			const currentWindow = getCurrentWebviewWindow();
-			unlistenBlur = await currentWindow.onFocusChanged(({ payload: focused }) => {
+			const ul2 = await getCurrentWebviewWindow().onFocusChanged(({ payload: focused }) => {
 				if (!focused) {
-					currentWindow.hide();
+					getCurrentWebviewWindow().hide();
 				}
 			});
+
+			if (cancelled) {
+				ul1();
+				ul2();
+			} else {
+				unlistenFocus = ul1;
+				unlistenBlur = ul2;
+			}
 		};
 
 		init();
 
 		return () => {
+			cancelled = true;
 			if (unlistenFocus) unlistenFocus();
 			if (unlistenBlur) unlistenBlur();
 		};
@@ -126,7 +133,7 @@
 						<div class="card-top">
 							<span class="session-dot" style="background: {getStatusColor(session.status)}"></span>
 							<span class="session-project">{session.sessionName}</span>
-							<svg class="open-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<svg aria-hidden="true" class="open-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 								<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
 								<polyline points="15 3 21 3 21 9" />
 								<line x1="10" y1="14" x2="21" y2="3" />
@@ -145,7 +152,7 @@
 	<footer class="popover-footer">
 		<button class="dashboard-btn" onclick={openMainWindow}>
 			Open Dashboard
-			<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+			<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 				<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
 				<polyline points="15 3 21 3 21 9" />
 				<line x1="10" y1="14" x2="21" y2="3" />
@@ -223,10 +230,13 @@
 		letter-spacing: 0.05em;
 	}
 
+	.empty-state p {
+		margin: 0;
+	}
+
 	.session-list {
 		display: flex;
 		flex-direction: column;
-		gap: 1px;
 	}
 
 	.session-card {
@@ -251,6 +261,11 @@
 
 	.session-card:hover {
 		background: var(--bg-elevated);
+	}
+
+	.session-card:focus-visible {
+		outline: 1px solid var(--border-focus);
+		outline-offset: -1px;
 	}
 
 	.card-top {
