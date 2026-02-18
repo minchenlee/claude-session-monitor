@@ -33,6 +33,12 @@ use cocoa::appkit::{NSWindow, NSWindowCollectionBehavior};
 #[cfg(target_os = "macos")]
 #[allow(deprecated)]
 use cocoa::base::id;
+#[cfg(target_os = "macos")]
+use objc::msg_send;
+#[cfg(target_os = "macos")]
+use objc::sel;
+#[cfg(target_os = "macos")]
+use objc::sel_impl;
 
 // ── Shared types ────────────────────────────────────────────────────
 
@@ -262,6 +268,7 @@ pub fn run() {
             #[allow(deprecated)]
             if let Some(popover) = app.get_webview_window("popover") {
                 if let Ok(ptr) = popover.ns_window() {
+                    eprintln!("[c9watch] Setting popover NSWindow level and collection behavior");
                     unsafe {
                         let win = ptr as id;
                         NSWindow::setLevel_(win, 25);
@@ -270,8 +277,15 @@ pub fn run() {
                             NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
                                 | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary,
                         );
+                        // Prevent macOS from auto-hiding this window when the app loses focus
+                        // (which happens when a fullscreen app is active)
+                        let _: () = msg_send![win, setHidesOnDeactivate: false];
                     }
+                } else {
+                    eprintln!("[c9watch] Failed to get NSWindow pointer for popover");
                 }
+            } else {
+                eprintln!("[c9watch] Popover window not found during setup");
             }
 
             // ── Tray icon ───────────────────────────────────────
@@ -312,6 +326,23 @@ pub fn run() {
                                 let _ = popover.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
                                 let _ = popover.show();
                                 let _ = popover.set_focus();
+
+                                // Re-apply window level and force to front on every show.
+                                // Tauri's show()/hide() can reset the window level, and
+                                // orderFrontRegardless() forces visibility in the current Space
+                                // (including fullscreen Spaces).
+                                #[cfg(target_os = "macos")]
+                                #[allow(deprecated)]
+                                {
+                                    if let Ok(ptr) = popover.ns_window() {
+                                        unsafe {
+                                            let win = ptr as id;
+                                            NSWindow::setLevel_(win, 25);
+                                            let _: () = msg_send![win, setHidesOnDeactivate: false];
+                                            let _: () = msg_send![win, orderFrontRegardless];
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
