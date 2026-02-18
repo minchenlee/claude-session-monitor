@@ -350,12 +350,9 @@ pub fn run() {
 
                                         let pos = rect.position.to_physical::<f64>(scale);
                                         let size = rect.size.to_physical::<f64>(scale);
-                                        let popover_physical_width = popover
-                                            .outer_size()
-                                            .map(|s| s.width as f64)
-                                            .unwrap_or(320.0 * scale);
 
-                                        let x = pos.x + (size.width / 2.0) - (popover_physical_width / 2.0);
+                                        // Align panel left edge with tray icon left edge
+                                        let x = pos.x;
                                         let y = pos.y + size.height + 4.0;
 
                                         let _ = popover.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
