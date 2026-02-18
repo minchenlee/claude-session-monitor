@@ -27,6 +27,12 @@ use tauri::{
     Emitter, PhysicalPosition,
 };
 use tauri::{AppHandle, Manager};
+#[cfg(target_os = "macos")]
+#[allow(deprecated)]
+use cocoa::appkit::NSWindow;
+#[cfg(target_os = "macos")]
+#[allow(deprecated)]
+use cocoa::base::id;
 
 // ── Shared types ────────────────────────────────────────────────────
 
@@ -265,12 +271,19 @@ pub fn run() {
                             if popover.is_visible().unwrap_or(false) {
                                 let _ = popover.hide();
                             } else {
-                                let pos = rect.position.to_physical::<f64>(1.0);
-                                let size = rect.size.to_physical::<f64>(1.0);
+                                let scale = popover
+                                    .current_monitor()
+                                    .ok()
+                                    .flatten()
+                                    .map(|m| m.scale_factor())
+                                    .unwrap_or(1.0);
+
+                                let pos = rect.position.to_physical::<f64>(scale);
+                                let size = rect.size.to_physical::<f64>(scale);
                                 let popover_physical_width = popover
                                     .outer_size()
                                     .map(|s| s.width as f64)
-                                    .unwrap_or(320.0);
+                                    .unwrap_or(320.0 * scale);
 
                                 let x = pos.x + (size.width / 2.0) - (popover_physical_width / 2.0);
                                 let y = pos.y + size.height + 4.0;
@@ -278,6 +291,21 @@ pub fn run() {
                                 let _ = popover.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
                                 let _ = popover.show();
                                 let _ = popover.set_focus();
+
+                                // Fix 2: Set window level above fullscreen app spaces on macOS.
+                                // alwaysOnTop maps to NSWindowLevel.floating which is below fullscreen spaces.
+                                // Level 25 = kCGStatusBarWindowLevel, which is above fullscreen spaces
+                                // and is the level used by the macOS menu bar itself.
+                                #[cfg(target_os = "macos")]
+                                #[allow(deprecated)]
+                                {
+                                    if let Ok(ptr) = popover.ns_window() {
+                                        unsafe {
+                                            let win = ptr as id;
+                                            NSWindow::setLevel_(win, 25);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

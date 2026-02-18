@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/stores';
+	import { get } from 'svelte/store';
 	import { initializeSessionListeners, sessions } from '$lib/stores/sessions';
 	import { getSessions } from '$lib/api';
 	import { loadDemoDataIfActive } from '$lib/demo';
@@ -8,6 +10,9 @@
 	import '../app.css';
 
 	onMount(async () => {
+		// Popover window has its own initialization — skip root layout setup
+		if (get(page).url.pathname === '/popover') return;
+
 		// If demo mode was persisted, load demo data and skip real fetch
 		const demoActive = loadDemoDataIfActive();
 
