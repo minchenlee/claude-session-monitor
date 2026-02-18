@@ -242,7 +242,8 @@ pub fn run() {
     let builder = builder.plugin(tauri_nspanel::init());
 
     #[cfg(not(mobile))]
-    let builder = builder.setup(|app| {
+    let builder = builder
+        .setup(|app| {
             // ── WebSocket server ────────────────────────────────
             let token = auth::generate_token();
             let local_ip = auth::get_local_ip();
@@ -340,7 +341,8 @@ pub fn run() {
                                     panel.hide();
                                 } else {
                                     // Position below the tray icon, centered horizontally
-                                    if let Some(popover) = app_handle.get_webview_window("popover") {
+                                    if let Some(popover) = app_handle.get_webview_window("popover")
+                                    {
                                         let scale = popover
                                             .current_monitor()
                                             .ok()
@@ -355,7 +357,10 @@ pub fn run() {
                                         let x = pos.x;
                                         let y = pos.y + size.height + 4.0;
 
-                                        let _ = popover.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
+                                        let _ = popover.set_position(PhysicalPosition::new(
+                                            x.round() as i32,
+                                            y.round() as i32,
+                                        ));
                                     }
                                     panel.show_and_make_key();
                                 }
@@ -376,10 +381,14 @@ pub fn run() {
                                         .map(|s| s.width as f64)
                                         .unwrap_or(320.0);
 
-                                    let x = pos.x + (size.width / 2.0) - (popover_physical_width / 2.0);
+                                    let x =
+                                        pos.x + (size.width / 2.0) - (popover_physical_width / 2.0);
                                     let y = pos.y + size.height + 4.0;
 
-                                    let _ = popover.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
+                                    let _ = popover.set_position(PhysicalPosition::new(
+                                        x.round() as i32,
+                                        y.round() as i32,
+                                    ));
                                     let _ = popover.show();
                                     let _ = popover.set_focus();
                                 }
