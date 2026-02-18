@@ -122,14 +122,20 @@
 		{:else}
 			<div class="session-list">
 				{#each sessions as session (session.id)}
-					<button class="session-row" onclick={() => handleOpen(session)}>
-						<span class="session-dot" style="background: {getStatusColor(session.status)}"></span>
-						<span class="session-name">{session.customTitle || session.sessionName}</span>
-						<svg class="open-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-							<polyline points="15 3 21 3 21 9" />
-							<line x1="10" y1="14" x2="21" y2="3" />
-						</svg>
+					<button class="session-card" onclick={() => handleOpen(session)}>
+						<div class="card-top">
+							<span class="session-dot" style="background: {getStatusColor(session.status)}"></span>
+							<span class="session-project">{session.sessionName}</span>
+							<svg class="open-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+								<polyline points="15 3 21 3 21 9" />
+								<line x1="10" y1="14" x2="21" y2="3" />
+							</svg>
+						</div>
+						<div class="card-title">{session.customTitle || session.firstPrompt}</div>
+						{#if session.latestMessage}
+							<div class="card-latest">{session.latestMessage}</div>
+						{/if}
 					</button>
 				{/each}
 			</div>
@@ -168,6 +174,7 @@
 		justify-content: space-between;
 		padding: 12px 16px;
 		border-bottom: 1px solid var(--border-default);
+		flex-shrink: 0;
 	}
 
 	.status-dots {
@@ -219,26 +226,37 @@
 	.session-list {
 		display: flex;
 		flex-direction: column;
+		gap: 1px;
 	}
 
-	.session-row {
+	.session-card {
 		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 8px 16px;
+		flex-direction: column;
+		gap: 3px;
+		padding: 9px 16px;
 		border: none;
+		border-bottom: 1px solid var(--border-muted);
 		background: transparent;
 		color: var(--text-primary);
 		font-family: var(--font-mono);
-		font-size: 12px;
 		cursor: pointer;
 		transition: background var(--transition-fast);
 		text-align: left;
 		width: 100%;
 	}
 
-	.session-row:hover {
+	.session-card:last-child {
+		border-bottom: none;
+	}
+
+	.session-card:hover {
 		background: var(--bg-elevated);
+	}
+
+	.card-top {
+		display: flex;
+		align-items: center;
+		gap: 8px;
 	}
 
 	.session-dot {
@@ -248,8 +266,11 @@
 		flex-shrink: 0;
 	}
 
-	.session-name {
+	.session-project {
 		flex: 1;
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--text-primary);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -262,13 +283,32 @@
 		transition: opacity var(--transition-fast);
 	}
 
-	.session-row:hover .open-icon {
+	.session-card:hover .open-icon {
 		opacity: 1;
+	}
+
+	.card-title {
+		font-size: 11px;
+		color: var(--text-secondary);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		padding-left: 14px;
+	}
+
+	.card-latest {
+		font-size: 10px;
+		color: var(--text-muted);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		padding-left: 14px;
 	}
 
 	.popover-footer {
 		padding: 8px 12px;
 		border-top: 1px solid var(--border-default);
+		flex-shrink: 0;
 	}
 
 	.dashboard-btn {
