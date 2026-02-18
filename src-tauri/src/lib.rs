@@ -29,7 +29,7 @@ use tauri::{
 use tauri::{AppHandle, Manager};
 #[cfg(target_os = "macos")]
 #[allow(deprecated)]
-use cocoa::appkit::NSWindow;
+use cocoa::appkit::{NSWindow, NSWindowCollectionBehavior};
 #[cfg(target_os = "macos")]
 #[allow(deprecated)]
 use cocoa::base::id;
@@ -292,10 +292,12 @@ pub fn run() {
                                 let _ = popover.show();
                                 let _ = popover.set_focus();
 
-                                // Fix 2: Set window level above fullscreen app spaces on macOS.
-                                // alwaysOnTop maps to NSWindowLevel.floating which is below fullscreen spaces.
-                                // Level 25 = kCGStatusBarWindowLevel, which is above fullscreen spaces
-                                // and is the level used by the macOS menu bar itself.
+                                // Set window level and collection behavior so the popover
+                                // appears above fullscreen app spaces on macOS.
+                                // - Level 25 = kCGStatusBarWindowLevel (same as the menu bar)
+                                // - NSWindowCollectionBehaviorCanJoinAllSpaces (1 << 0 = 1) allows
+                                //   the window to appear in all Spaces, including fullscreen ones.
+                                //   Without this flag the window stays in its originating Space.
                                 #[cfg(target_os = "macos")]
                                 #[allow(deprecated)]
                                 {
@@ -303,6 +305,13 @@ pub fn run() {
                                         unsafe {
                                             let win = ptr as id;
                                             NSWindow::setLevel_(win, 25);
+                                            // CanJoinAllSpaces: window appears in all Spaces including fullscreen
+                                            // Stationary: window stays put when switching Spaces (doesn't animate)
+                                            NSWindow::setCollectionBehavior_(
+                                                win,
+                                                NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
+                                                    | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary,
+                                            );
                                         }
                                     }
                                 }
