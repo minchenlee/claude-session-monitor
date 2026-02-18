@@ -412,6 +412,14 @@ pub fn run() {
     let builder = builder.setup(|_app| Ok(()));
 
     builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // Prevent the app from exiting when all windows are closed.
+            // This is essential for tray/menu bar apps — the app stays alive
+            // in the background with the tray icon even when no windows are visible.
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                api.prevent_exit();
+            }
+        });
 }
