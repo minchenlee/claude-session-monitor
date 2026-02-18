@@ -253,6 +253,27 @@ pub fn run() {
             // ── Polling loop ────────────────────────────────────
             start_polling(app.handle().clone(), sessions_tx, notifications_tx);
 
+            // ── Popover window: set macOS window level and collection behavior ──
+            // Must be done at startup before the window is first shown.
+            // Level 25 = kCGStatusBarWindowLevel (same as the menu bar).
+            // CanJoinAllSpaces allows the popover to appear in fullscreen Spaces.
+            // Stationary prevents the window from animating during Space transitions.
+            #[cfg(target_os = "macos")]
+            #[allow(deprecated)]
+            if let Some(popover) = app.get_webview_window("popover") {
+                if let Ok(ptr) = popover.ns_window() {
+                    unsafe {
+                        let win = ptr as id;
+                        NSWindow::setLevel_(win, 25);
+                        NSWindow::setCollectionBehavior_(
+                            win,
+                            NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
+                                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary,
+                        );
+                    }
+                }
+            }
+
             // ── Tray icon ───────────────────────────────────────
             let app_handle = app.handle().clone();
             TrayIconBuilder::new()
@@ -291,30 +312,6 @@ pub fn run() {
                                 let _ = popover.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
                                 let _ = popover.show();
                                 let _ = popover.set_focus();
-
-                                // Set window level and collection behavior so the popover
-                                // appears above fullscreen app spaces on macOS.
-                                // - Level 25 = kCGStatusBarWindowLevel (same as the menu bar)
-                                // - NSWindowCollectionBehaviorCanJoinAllSpaces (1 << 0 = 1) allows
-                                //   the window to appear in all Spaces, including fullscreen ones.
-                                //   Without this flag the window stays in its originating Space.
-                                #[cfg(target_os = "macos")]
-                                #[allow(deprecated)]
-                                {
-                                    if let Ok(ptr) = popover.ns_window() {
-                                        unsafe {
-                                            let win = ptr as id;
-                                            NSWindow::setLevel_(win, 25);
-                                            // CanJoinAllSpaces: window appears in all Spaces including fullscreen
-                                            // Stationary: window stays put when switching Spaces (doesn't animate)
-                                            NSWindow::setCollectionBehavior_(
-                                                win,
-                                                NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
-                                                    | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary,
-                                            );
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
