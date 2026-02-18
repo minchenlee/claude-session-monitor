@@ -7,7 +7,6 @@
 	import type { Session } from '$lib/types';
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
-	import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 	import { isDemoMode, loadDemoDataIfActive } from '$lib/demo';
 
 	let sessions = $derived($sortedSessions);
@@ -16,7 +15,6 @@
 
 	onMount(() => {
 		let unlistenFocus: (() => void) | null = null;
-		let unlistenBlur: (() => void) | null = null;
 		let cancelled = false;
 
 		const init = async () => {
@@ -42,18 +40,10 @@
 				}
 			});
 
-			const ul2 = await getCurrentWebviewWindow().onFocusChanged(({ payload: focused }) => {
-				if (!focused) {
-					getCurrentWebviewWindow().hide();
-				}
-			});
-
 			if (cancelled) {
 				ul1();
-				ul2();
 			} else {
 				unlistenFocus = ul1;
-				unlistenBlur = ul2;
 			}
 		};
 
@@ -62,7 +52,6 @@
 		return () => {
 			cancelled = true;
 			if (unlistenFocus) unlistenFocus();
-			if (unlistenBlur) unlistenBlur();
 		};
 	});
 
@@ -264,8 +253,7 @@
 	}
 
 	.session-card:focus-visible {
-		outline: 1px solid var(--border-focus);
-		outline-offset: -1px;
+		outline: none;
 	}
 
 	.card-top {

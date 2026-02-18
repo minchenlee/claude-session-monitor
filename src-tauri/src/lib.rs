@@ -171,19 +171,19 @@ async fn get_terminal_title(pid: u32) -> Result<Option<String>, String> {
 #[cfg(not(mobile))]
 #[tauri::command]
 async fn show_main_window(app: AppHandle) -> Result<(), String> {
+    // Hide popover first (before showing main window to avoid race)
+    #[cfg(target_os = "macos")]
+    if let Ok(panel) = app.get_webview_panel("popover") {
+        panel.hide();
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(popover) = app.get_webview_window("popover") {
+        let _ = popover.hide();
+    }
+
     if let Some(window) = app.get_webview_window("main") {
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
-
-        // Hide popover panel on macOS, regular window on other platforms
-        #[cfg(target_os = "macos")]
-        if let Ok(panel) = app.get_webview_panel("popover") {
-            panel.hide();
-        }
-        #[cfg(not(target_os = "macos"))]
-        if let Some(popover) = app.get_webview_window("popover") {
-            let _ = popover.hide();
-        }
     }
     Ok(())
 }
@@ -218,6 +218,10 @@ tauri_panel! {
             can_become_key_window: true,
             is_floating_panel: true
         }
+    })
+
+    panel_event!(PopoverEventHandler {
+        window_did_resign_key(notification: &NSNotification) -> ()
     })
 }
 
@@ -298,6 +302,19 @@ pub fn run() {
 
                 // Don't hide when app is deactivated (when fullscreen app is active)
                 panel.set_hides_on_deactivate(false);
+
+                // Rounded corners at the native window level
+                panel.set_corner_radius(10.0);
+
+                // Click-outside dismiss: hide panel when it loses key window status
+                let handler = PopoverEventHandler::new();
+                let handle = app.handle().clone();
+                handler.window_did_resign_key(move |_notification| {
+                    if let Ok(p) = handle.get_webview_panel("popover") {
+                        p.hide();
+                    }
+                });
+                panel.set_event_handler(Some(handler.as_ref()));
 
                 eprintln!("[c9watch] Popover converted to NSPanel with fullscreen support");
             }
