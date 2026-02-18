@@ -31,7 +31,9 @@
 			}
 
 			const ul1 = await listen('tauri://focus', async () => {
-				if (get(isDemoMode)) return;
+				// Re-check demo mode on every focus (user may have toggled it in main window)
+				const demo = loadDemoDataIfActive();
+				if (demo) return;
 				try {
 					const freshSessions = await getSessions();
 					sessionsStore.set(freshSessions);
