@@ -211,6 +211,19 @@ fn activate_app_fallback(app_name: &str) -> Result<(), String> {
         "Windsurf" => "Windsurf",
         "Zed" => "Zed",
         "Sublime Text" => "Sublime Text",
+        "PhpStorm" => "PhpStorm",
+        "IntelliJ IDEA" | "IntelliJ IDEA CE" => "IntelliJ IDEA",
+        "WebStorm" => "WebStorm",
+        "PyCharm" | "PyCharm CE" => "PyCharm",
+        "GoLand" => "GoLand",
+        "CLion" => "CLion",
+        "Rider" => "Rider",
+        "RubyMine" => "RubyMine",
+        "DataGrip" => "DataGrip",
+        "Android Studio" => "Android Studio",
+        "Aqua" => "Aqua",
+        "Fleet" => "Fleet",
+        "RustRover" => "RustRover",
         _ => app_name,
     };
 
@@ -246,6 +259,16 @@ fn activate_app_fallback(app_name: &str) -> Result<(), String> {
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn activate_app_fallback(_app_name: &str) -> Result<(), String> {
     Ok(())
+}
+
+/// Get the JetBrains Toolbox scripts directory
+#[cfg(target_os = "macos")]
+fn get_jetbrains_toolbox_scripts_dir() -> Option<String> {
+    dirs::home_dir().map(|home| {
+        home.join("Library/Application Support/JetBrains/Toolbox/scripts")
+            .to_string_lossy()
+            .to_string()
+    })
 }
 
 /// Get the CLI path for an application if available
@@ -287,7 +310,68 @@ fn get_app_cli(app_name: &str) -> Option<String> {
         }
     }
 
+    // JetBrains IDEs: check Toolbox scripts dir, then ~/Applications, then /Applications
+    let jetbrains_cli: Option<(&str, &str)> = match app_name {
+        "PhpStorm" => Some(("phpstorm", "PhpStorm")),
+        "IntelliJ IDEA" | "IntelliJ IDEA CE" => Some(("idea", "IntelliJ IDEA")),
+        "WebStorm" => Some(("webstorm", "WebStorm")),
+        "PyCharm" | "PyCharm CE" => Some(("pycharm", "PyCharm")),
+        "GoLand" => Some(("goland", "GoLand")),
+        "CLion" => Some(("clion", "CLion")),
+        "Rider" => Some(("rider", "Rider")),
+        "RubyMine" => Some(("rubymine", "RubyMine")),
+        "DataGrip" => Some(("datagrip", "DataGrip")),
+        "Android Studio" => Some(("studio", "Android Studio")),
+        "Aqua" => Some(("aqua", "Aqua")),
+        "Fleet" => Some(("fleet", "Fleet")),
+        "RustRover" => Some(("rustrover", "RustRover")),
+        _ => None,
+    };
+
+    if let Some((bin_name, app_dir_name)) = jetbrains_cli {
+        // 1. JetBrains Toolbox scripts directory
+        if let Some(scripts_dir) = get_jetbrains_toolbox_scripts_dir() {
+            let toolbox_path = format!("{}/{}", scripts_dir, bin_name);
+            if std::path::Path::new(&toolbox_path).exists() {
+                return Some(toolbox_path);
+            }
+        }
+
+        // 2. ~/Applications (Toolbox install location)
+        if let Some(home) = dirs::home_dir() {
+            let user_app_path = home
+                .join(format!(
+                    "Applications/{}.app/Contents/MacOS/{}",
+                    app_dir_name, bin_name
+                ))
+                .to_string_lossy()
+                .to_string();
+            if std::path::Path::new(&user_app_path).exists() {
+                return Some(user_app_path);
+            }
+        }
+
+        // 3. /Applications (manual install location)
+        let system_app_path = format!(
+            "/Applications/{}.app/Contents/MacOS/{}",
+            app_dir_name, bin_name
+        );
+        if std::path::Path::new(&system_app_path).exists() {
+            return Some(system_app_path);
+        }
+    }
+
     None
+}
+
+/// Get the JetBrains Toolbox scripts directory on Linux
+#[cfg(target_os = "linux")]
+fn get_jetbrains_toolbox_scripts_dir() -> Option<String> {
+    dirs::home_dir().map(|home| {
+        home.join(".local/share/JetBrains/Toolbox/scripts")
+            .to_string_lossy()
+            .to_string()
+    })
 }
 
 /// Get the CLI path for an application on Linux
@@ -320,6 +404,42 @@ fn get_app_cli(app_name: &str) -> Option<String> {
         }
     }
 
+    // JetBrains IDEs: check Toolbox scripts dir, then standard paths
+    let jetbrains_bin = match app_name {
+        "PhpStorm" => Some("phpstorm"),
+        "IntelliJ IDEA" | "IntelliJ IDEA CE" => Some("idea"),
+        "WebStorm" => Some("webstorm"),
+        "PyCharm" | "PyCharm CE" => Some("pycharm"),
+        "GoLand" => Some("goland"),
+        "CLion" => Some("clion"),
+        "Rider" => Some("rider"),
+        "RubyMine" => Some("rubymine"),
+        "DataGrip" => Some("datagrip"),
+        "Android Studio" => Some("studio"),
+        "Aqua" => Some("aqua"),
+        "Fleet" => Some("fleet"),
+        "RustRover" => Some("rustrover"),
+        _ => None,
+    };
+
+    if let Some(bin_name) = jetbrains_bin {
+        // 1. JetBrains Toolbox scripts directory
+        if let Some(scripts_dir) = get_jetbrains_toolbox_scripts_dir() {
+            let toolbox_path = format!("{}/{}", scripts_dir, bin_name);
+            if std::path::Path::new(&toolbox_path).exists() {
+                return Some(toolbox_path);
+            }
+        }
+
+        // 2. Standard paths
+        for prefix in &["/usr/local/bin", "/snap/bin", "/usr/bin"] {
+            let path = format!("{}/{}", prefix, bin_name);
+            if std::path::Path::new(&path).exists() {
+                return Some(path);
+            }
+        }
+    }
+
     // Fallback: try to find the binary via `which`
     let bin_name = match app_name {
         "Zed" => Some("zed"),
@@ -327,6 +447,19 @@ fn get_app_cli(app_name: &str) -> Option<String> {
         "Cursor" => Some("cursor"),
         "Windsurf" => Some("windsurf"),
         "Sublime Text" => Some("subl"),
+        "PhpStorm" => Some("phpstorm"),
+        "IntelliJ IDEA" | "IntelliJ IDEA CE" => Some("idea"),
+        "WebStorm" => Some("webstorm"),
+        "PyCharm" | "PyCharm CE" => Some("pycharm"),
+        "GoLand" => Some("goland"),
+        "CLion" => Some("clion"),
+        "Rider" => Some("rider"),
+        "RubyMine" => Some("rubymine"),
+        "DataGrip" => Some("datagrip"),
+        "Android Studio" => Some("studio"),
+        "Aqua" => Some("aqua"),
+        "Fleet" => Some("fleet"),
+        "RustRover" => Some("rustrover"),
         _ => None,
     };
 
@@ -465,6 +598,52 @@ fn get_app_name(comm: &str) -> Option<&'static str> {
             if comm_lower.contains("sublime text.app") {
                 return Some("Sublime Text");
             }
+            // JetBrains IDEs (check CE variants before non-CE to avoid false matches)
+            if comm_lower.contains("intellij idea ce.app") {
+                return Some("IntelliJ IDEA CE");
+            }
+            if comm_lower.contains("intellij idea.app") {
+                return Some("IntelliJ IDEA");
+            }
+            if comm_lower.contains("pycharm ce.app") {
+                return Some("PyCharm CE");
+            }
+            if comm_lower.contains("pycharm.app") {
+                return Some("PyCharm");
+            }
+            if comm_lower.contains("phpstorm.app") {
+                return Some("PhpStorm");
+            }
+            if comm_lower.contains("webstorm.app") {
+                return Some("WebStorm");
+            }
+            if comm_lower.contains("goland.app") {
+                return Some("GoLand");
+            }
+            if comm_lower.contains("clion.app") {
+                return Some("CLion");
+            }
+            if comm_lower.contains("rider.app") {
+                return Some("Rider");
+            }
+            if comm_lower.contains("rubymine.app") {
+                return Some("RubyMine");
+            }
+            if comm_lower.contains("datagrip.app") {
+                return Some("DataGrip");
+            }
+            if comm_lower.contains("android studio.app") {
+                return Some("Android Studio");
+            }
+            if comm_lower.contains("aqua.app") {
+                return Some("Aqua");
+            }
+            if comm_lower.contains("fleet.app") {
+                return Some("Fleet");
+            }
+            if comm_lower.contains("rustrover.app") {
+                return Some("RustRover");
+            }
         }
     }
 
@@ -504,6 +683,21 @@ fn get_app_name(comm: &str) -> Option<&'static str> {
         "code" | "code helper" | "electron" => Some("Visual Studio Code"),
         "cursor" => Some("Cursor"),
         "windsurf" => Some("Windsurf"),
+
+        // JetBrains IDEs
+        "phpstorm" => Some("PhpStorm"),
+        "idea" => Some("IntelliJ IDEA"),
+        "webstorm" => Some("WebStorm"),
+        "pycharm" => Some("PyCharm"),
+        "goland" => Some("GoLand"),
+        "clion" => Some("CLion"),
+        "rider" => Some("Rider"),
+        "rubymine" => Some("RubyMine"),
+        "datagrip" => Some("DataGrip"),
+        "studio" => Some("Android Studio"),
+        "aqua" => Some("Aqua"),
+        "fleet" => Some("Fleet"),
+        "rustrover" => Some("RustRover"),
 
         // Other editors
         "sublime_text" | "subl" => Some("Sublime Text"),
