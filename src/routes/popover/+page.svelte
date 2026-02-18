@@ -7,18 +7,19 @@
 	import type { Session } from '$lib/types';
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
+	import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 	import { isDemoMode, loadDemoDataIfActive } from '$lib/demo';
 
 	let sessions = $derived($sortedSessions);
 	let summary = $derived($statusSummary);
-
-	// Initialize data for this window context
-	let unlistenFocus: (() => void) | null = null;
+	let totalSessions = $derived(sessions.length);
 
 	onMount(() => {
+		let unlistenFocus: (() => void) | null = null;
+		let unlistenBlur: (() => void) | null = null;
+
 		const init = async () => {
 			const demoActive = loadDemoDataIfActive();
-
 			await initializeSessionListeners();
 
 			if (!demoActive) {
@@ -30,7 +31,7 @@
 				}
 			}
 
-			// Refresh when window becomes visible (skip in demo mode)
+			// Refresh when popover becomes visible
 			unlistenFocus = await listen('tauri://focus', async () => {
 				if (get(isDemoMode)) return;
 				try {
@@ -40,24 +41,36 @@
 					console.error('Failed to refresh sessions:', error);
 				}
 			});
+
+			// Hide popover when it loses focus (click-outside)
+			const currentWindow = getCurrentWebviewWindow();
+			unlistenBlur = await currentWindow.onFocusChanged(({ payload: focused }) => {
+				if (!focused) {
+					currentWindow.hide();
+				}
+			});
 		};
 
 		init();
 
 		return () => {
 			if (unlistenFocus) unlistenFocus();
+			if (unlistenBlur) unlistenBlur();
 		};
 	});
 
-	// Get top priority sessions (max 5)
-	let prioritySessions = $derived(
-		sessions
-			.filter(s =>
-				s.status === SessionStatus.NeedsPermission ||
-				s.status === SessionStatus.WaitingForInput
-			)
-			.slice(0, 5)
-	);
+	function getStatusColor(status: SessionStatus): string {
+		switch (status) {
+			case SessionStatus.NeedsPermission:
+				return 'var(--status-permission)';
+			case SessionStatus.WaitingForInput:
+				return 'var(--status-input)';
+			case SessionStatus.Working:
+				return 'var(--status-working)';
+			default:
+				return 'var(--status-connecting)';
+		}
+	}
 
 	async function handleOpen(session: Session) {
 		try {
@@ -74,97 +87,57 @@
 			console.error('Failed to open main window:', error);
 		}
 	}
-
-	function getStatusColor(status: SessionStatus): string {
-		switch (status) {
-			case SessionStatus.NeedsPermission:
-				return 'var(--status-permission)';
-			case SessionStatus.WaitingForInput:
-				return 'var(--status-input)';
-			case SessionStatus.Working:
-				return 'var(--status-working)';
-			default:
-				return 'var(--status-working)';
-		}
-	}
-
-	function getStatusLabel(status: SessionStatus): string {
-		switch (status) {
-			case SessionStatus.NeedsPermission:
-				return 'Permission';
-			case SessionStatus.WaitingForInput:
-				return 'Idle';
-			case SessionStatus.Working:
-				return 'Working';
-			default:
-				return 'Working';
-		}
-	}
 </script>
 
 <div class="popover">
 	<header class="popover-header">
-		<div class="header-title">Claude Sessions</div>
-		<div class="header-summary">
+		<div class="status-dots">
+			{#if summary.working > 0}
+				<span class="dot-pair">
+					<span class="dot" style="background: var(--status-working)"></span>
+					<span class="dot-count">{summary.working}</span>
+				</span>
+			{/if}
 			{#if summary.permission > 0}
-				<span class="badge permission">{summary.permission}</span>
+				<span class="dot-pair">
+					<span class="dot" style="background: var(--status-permission)"></span>
+					<span class="dot-count">{summary.permission}</span>
+				</span>
 			{/if}
 			{#if summary.input > 0}
-				<span class="badge idle">{summary.input}</span>
-			{/if}
-			{#if summary.working > 0}
-				<span class="badge working">{summary.working}</span>
+				<span class="dot-pair">
+					<span class="dot" style="background: var(--status-input)"></span>
+					<span class="dot-count">{summary.input}</span>
+				</span>
 			{/if}
 		</div>
+		<span class="total-count">{totalSessions} session{totalSessions !== 1 ? 's' : ''}</span>
 	</header>
 
 	<main class="popover-content">
 		{#if sessions.length === 0}
 			<div class="empty-state">
-				<div class="empty-icon">
-					<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-						<circle cx="12" cy="12" r="10" />
-						<path d="M12 6v6l4 2" />
-					</svg>
-				</div>
 				<p>No active sessions</p>
 			</div>
-		{:else if prioritySessions.length > 0}
-			<div class="session-list">
-				{#each prioritySessions as session (session.id)}
-					<div class="session-item" style="--status-color: {getStatusColor(session.status)}">
-						<div class="session-info">
-							<div class="session-project">{session.sessionName}</div>
-							<div class="session-prompt">{session.firstPrompt}</div>
-							<div class="session-meta">
-								<span class="status-badge">{getStatusLabel(session.status)}</span>
-								{#if session.gitBranch}
-									<span class="branch">{session.gitBranch}</span>
-								{/if}
-							</div>
-						</div>
-						<div class="session-actions">
-							<button class="action-btn open" onclick={() => handleOpen(session)} title="Open">
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-									<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-									<polyline points="15 3 21 3 21 9" />
-									<line x1="10" y1="14" x2="21" y2="3" />
-								</svg>
-							</button>
-						</div>
-					</div>
-				{/each}
-			</div>
 		{:else}
-			<div class="all-working">
-				<div class="working-indicator"></div>
-				<p>{summary.working} session{summary.working !== 1 ? 's' : ''} working</p>
+			<div class="session-list">
+				{#each sessions as session (session.id)}
+					<button class="session-row" onclick={() => handleOpen(session)}>
+						<span class="session-dot" style="background: {getStatusColor(session.status)}"></span>
+						<span class="session-name">{session.customTitle || session.sessionName}</span>
+						<svg class="open-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+							<polyline points="15 3 21 3 21 9" />
+							<line x1="10" y1="14" x2="21" y2="3" />
+						</svg>
+					</button>
+				{/each}
 			</div>
 		{/if}
 	</main>
 
 	<footer class="popover-footer">
-		<button class="open-app-btn" onclick={openMainWindow}>
+		<button class="dashboard-btn" onclick={openMainWindow}>
 			Open Dashboard
 			<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 				<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
@@ -182,203 +155,131 @@
 		height: 100vh;
 		background: var(--bg-base);
 		border: 1px solid var(--border-default);
-		border-radius: 8px;
+		border-radius: 10px;
 		overflow: hidden;
 		font-family: var(--font-mono);
+		user-select: none;
+		-webkit-user-select: none;
 	}
 
 	.popover-header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: var(--space-md) var(--space-lg);
+		padding: 12px 16px;
 		border-bottom: 1px solid var(--border-default);
-		background: var(--bg-elevated);
 	}
 
-	.header-title {
-		font-family: var(--font-pixel);
-		font-size: 11px;
-		font-weight: 500;
-		color: var(--text-primary);
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-	}
-
-	.header-summary {
+	.status-dots {
 		display: flex;
-		gap: var(--space-xs);
-	}
-
-	.badge {
-		display: inline-flex;
 		align-items: center;
-		justify-content: center;
-		min-width: 18px;
-		height: 18px;
-		padding: 0 var(--space-xs);
-		border-radius: 9px;
-		font-size: 10px;
+		gap: 12px;
+	}
+
+	.dot-pair {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+	}
+
+	.dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+
+	.dot-count {
+		font-size: 12px;
 		font-weight: 600;
-		color: var(--bg-base);
+		color: var(--text-primary);
 	}
 
-	.badge.permission {
-		background: var(--status-permission);
-	}
-
-	.badge.idle {
-		background: var(--status-input);
-	}
-
-	.badge.working {
-		background: var(--status-working);
+	.total-count {
+		font-size: 11px;
+		color: var(--text-muted);
 	}
 
 	.popover-content {
 		flex: 1;
 		overflow-y: auto;
-		padding: var(--space-sm);
 	}
 
-	.empty-state,
-	.all-working {
+	.empty-state {
 		display: flex;
-		flex-direction: column;
 		align-items: center;
 		justify-content: center;
 		height: 100%;
-		gap: var(--space-md);
 		color: var(--text-muted);
-	}
-
-	.empty-icon {
-		opacity: 0.5;
-	}
-
-	.empty-state p,
-	.all-working p {
 		font-size: 11px;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-	}
-
-	.working-indicator {
-		width: 12px;
-		height: 12px;
-		background: var(--status-working);
-		border-radius: 50%;
-		animation: pulse 1.5s ease-in-out infinite;
-	}
-
-	@keyframes pulse {
-		0%, 100% { opacity: 1; transform: scale(1); }
-		50% { opacity: 0.6; transform: scale(0.9); }
 	}
 
 	.session-list {
 		display: flex;
 		flex-direction: column;
-		gap: var(--space-xs);
 	}
 
-	.session-item {
+	.session-row {
 		display: flex;
 		align-items: center;
-		gap: var(--space-md);
-		padding: var(--space-sm) var(--space-md);
-		background: var(--bg-elevated);
-		border: 1px solid var(--border-default);
-		border-left: 3px solid var(--status-color);
-		border-radius: 4px;
-		transition: background 0.15s ease;
-	}
-
-	.session-item:hover {
-		background: var(--bg-hover);
-	}
-
-	.session-info {
-		flex: 1;
-		min-width: 0;
-	}
-
-	.session-project {
-		font-size: 11px;
-		font-weight: 600;
-		color: var(--text-primary);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
-	.session-prompt {
-		font-size: 10px;
-		color: var(--text-secondary);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		margin-top: 2px;
-	}
-
-	.session-meta {
-		display: flex;
-		align-items: center;
-		gap: var(--space-sm);
-		margin-top: var(--space-xs);
-	}
-
-	.status-badge {
-		font-size: 9px;
-		color: var(--status-color);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-
-	.branch {
-		font-size: 9px;
-		color: var(--text-muted);
-	}
-
-	.session-actions {
-		display: flex;
-		gap: var(--space-xs);
-	}
-
-	.action-btn {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 28px;
-		height: 28px;
-		border: 1px solid var(--border-default);
-		border-radius: 4px;
+		gap: 10px;
+		padding: 8px 16px;
+		border: none;
 		background: transparent;
-		color: var(--text-secondary);
+		color: var(--text-primary);
+		font-family: var(--font-mono);
+		font-size: 12px;
 		cursor: pointer;
-		transition: all 0.15s ease;
+		transition: background var(--transition-fast);
+		text-align: left;
+		width: 100%;
 	}
 
-	.action-btn:hover {
-		background: var(--bg-hover);
-		color: var(--text-primary);
+	.session-row:hover {
+		background: var(--bg-elevated);
+	}
+
+	.session-dot {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+
+	.session-name {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.open-icon {
+		flex-shrink: 0;
+		opacity: 0;
+		color: var(--text-muted);
+		transition: opacity var(--transition-fast);
+	}
+
+	.session-row:hover .open-icon {
+		opacity: 1;
 	}
 
 	.popover-footer {
-		padding: var(--space-sm) var(--space-lg);
+		padding: 8px 12px;
 		border-top: 1px solid var(--border-default);
-		background: var(--bg-elevated);
 	}
 
-	.open-app-btn {
+	.dashboard-btn {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: var(--space-sm);
+		gap: 6px;
 		width: 100%;
-		padding: var(--space-sm) var(--space-md);
+		padding: 6px 12px;
 		border: 1px solid var(--border-default);
-		border-radius: 4px;
+		border-radius: 6px;
 		background: transparent;
 		color: var(--text-secondary);
 		font-family: var(--font-mono);
@@ -386,11 +287,11 @@
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 		cursor: pointer;
-		transition: all 0.15s ease;
+		transition: all var(--transition-fast);
 	}
 
-	.open-app-btn:hover {
-		background: var(--bg-hover);
+	.dashboard-btn:hover {
+		background: var(--bg-elevated);
 		color: var(--text-primary);
 		border-color: var(--text-muted);
 	}
