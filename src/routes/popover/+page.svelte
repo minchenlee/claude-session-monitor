@@ -13,6 +13,33 @@
 	let summary = $derived($statusSummary);
 	let totalSessions = $derived(sessions.length);
 
+	// Pixel grid state
+	let trackWidth = $state(0);
+	let columns = $derived(Math.max(1, Math.floor((trackWidth - 6) / 10)));
+	let statusArray = $derived.by(() => {
+		const total = totalSessions;
+		if (total === 0) return Array(columns).fill('empty');
+		const counts = [summary.working, summary.permission, summary.input];
+		const percentages = counts.map((c) => (c / total) * columns);
+		const integerParts = percentages.map((p) => Math.floor(p));
+		const remainders = percentages.map((p, i) => p - integerParts[i]);
+		let allocated = integerParts.reduce((a, b) => a + b, 0);
+		const result = [...integerParts];
+		while (allocated < columns) {
+			let maxIdx = remainders.indexOf(Math.max(...remainders));
+			if (maxIdx === -1) break;
+			result[maxIdx]++;
+			remainders[maxIdx] = -1;
+			allocated++;
+		}
+		const arr: string[] = [];
+		for (let i = 0; i < result[0]; i++) arr.push('working');
+		for (let i = 0; i < result[1]; i++) arr.push('permission');
+		for (let i = 0; i < result[2]; i++) arr.push('input');
+		while (arr.length < columns) arr.push('empty');
+		return arr;
+	});
+
 	onMount(() => {
 		let unlistenFocus: (() => void) | null = null;
 		let cancelled = false;
@@ -93,28 +120,24 @@
 
 <div class="popover">
 	<header class="popover-header">
-		<div class="status-dots">
-			{#if summary.working > 0}
-				<span class="dot-pair">
-					<span class="dot" style="background: var(--status-working)"></span>
-					<span class="dot-count">{summary.working}</span>
-				</span>
-			{/if}
-			{#if summary.permission > 0}
-				<span class="dot-pair">
-					<span class="dot" style="background: var(--status-permission)"></span>
-					<span class="dot-count">{summary.permission}</span>
-				</span>
-			{/if}
-			{#if summary.input > 0}
-				<span class="dot-pair">
-					<span class="dot" style="background: var(--status-input)"></span>
-					<span class="dot-count">{summary.input}</span>
-				</span>
-			{/if}
-		</div>
 		<span class="total-count">{totalSessions} session{totalSessions !== 1 ? 's' : ''}</span>
+		<button class="dashboard-btn" onclick={openMainWindow}>
+			Open Dashboard
+			<svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+				<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+				<polyline points="15 3 21 3 21 9" />
+				<line x1="10" y1="14" x2="21" y2="3" />
+			</svg>
+		</button>
 	</header>
+
+	<div class="pixel-grid" class:empty={totalSessions === 0} bind:clientWidth={trackWidth}>
+		<div class="grid-inner" style="grid-template-columns: repeat({columns}, 1fr);">
+			{#each statusArray as status}
+				<div class="block {status}"></div>
+			{/each}
+		</div>
+	</div>
 
 	<main class="popover-content">
 		{#if sessions.length === 0}
@@ -143,17 +166,6 @@
 			</div>
 		{/if}
 	</main>
-
-	<footer class="popover-footer">
-		<button class="dashboard-btn" onclick={openMainWindow}>
-			Open Dashboard
-			<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-				<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-				<polyline points="15 3 21 3 21 9" />
-				<line x1="10" y1="14" x2="21" y2="3" />
-			</svg>
-		</button>
-	</footer>
 </div>
 
 <style>
@@ -174,40 +186,68 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 12px 16px;
-		border-bottom: 1px solid var(--border-default);
+		padding: 10px 16px;
 		flex-shrink: 0;
-	}
-
-	.status-dots {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-	}
-
-	.dot-pair {
-		display: flex;
-		align-items: center;
-		gap: 4px;
-	}
-
-	.dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 0;
-		flex-shrink: 0;
-	}
-
-	.dot-count {
-		font-size: 12px;
-		font-weight: 600;
-		color: var(--text-primary);
 	}
 
 	.total-count {
 		font-size: 11px;
 		color: var(--text-muted);
 	}
+
+	.dashboard-btn {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		padding: 4px 0;
+		border: none;
+		background: transparent;
+		color: var(--text-muted);
+		font-family: var(--font-mono);
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		cursor: pointer;
+		transition: color var(--transition-fast);
+	}
+
+	.dashboard-btn:hover {
+		color: var(--text-primary);
+	}
+
+	.dashboard-btn:focus-visible {
+		outline: none;
+	}
+
+	.pixel-grid {
+		height: 16px;
+		background: var(--bg-elevated);
+		border-top: 1px solid var(--border-muted);
+		border-bottom: 1px solid var(--border-muted);
+		padding: 3px 16px;
+		flex-shrink: 0;
+	}
+
+	.pixel-grid.empty {
+		opacity: 0.4;
+	}
+
+	.grid-inner {
+		display: grid;
+		grid-template-rows: 1fr;
+		gap: 2px;
+		height: 100%;
+	}
+
+	.block {
+		background: rgba(255, 255, 255, 0.06);
+		border-radius: 1px;
+		transition: background-color var(--transition-normal);
+	}
+
+	.block.working   { background-color: var(--status-working);    box-shadow: 0 0 3px var(--status-working-glow); }
+	.block.permission { background-color: var(--status-permission); box-shadow: 0 0 3px var(--status-permission-glow); }
+	.block.input     { background-color: var(--status-input);       box-shadow: 0 0 3px var(--status-input-glow); }
 
 	.popover-content {
 		flex: 1;
@@ -314,34 +354,4 @@
 		padding-left: 14px;
 	}
 
-	.popover-footer {
-		padding: 8px 12px;
-		border-top: 1px solid var(--border-default);
-		flex-shrink: 0;
-	}
-
-	.dashboard-btn {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 6px;
-		width: 100%;
-		padding: 6px 12px;
-		border: 1px solid var(--border-default);
-		border-radius: 6px;
-		background: transparent;
-		color: var(--text-secondary);
-		font-family: var(--font-mono);
-		font-size: 10px;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		cursor: pointer;
-		transition: all var(--transition-fast);
-	}
-
-	.dashboard-btn:hover {
-		background: var(--bg-elevated);
-		color: var(--text-primary);
-		border-color: var(--text-muted);
-	}
 </style>
