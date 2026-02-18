@@ -24,9 +24,14 @@ use std::time::Duration;
 #[cfg(not(mobile))]
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter,
+    Emitter, PhysicalPosition,
 };
 use tauri::{AppHandle, Manager};
+#[cfg(target_os = "macos")]
+use tauri_nspanel::{
+    tauri_panel, CollectionBehavior, ManagerExt as PanelManagerExt, PanelLevel, StyleMask,
+    WebviewWindowExt as PanelExt,
+};
 
 // ── Shared types ────────────────────────────────────────────────────
 
@@ -166,13 +171,18 @@ async fn get_terminal_title(pid: u32) -> Result<Option<String>, String> {
 #[cfg(not(mobile))]
 #[tauri::command]
 async fn show_main_window(app: AppHandle) -> Result<(), String> {
+    // On macOS the popover panel auto-hides via window_did_resign_key
+    // when the main window takes focus. No need to explicitly hide it here.
+    // (Calling panel.hide() here would deadlock the panel manager mutex
+    // because resign_key fires synchronously and also calls get_webview_panel.)
+    #[cfg(not(target_os = "macos"))]
+    if let Some(popover) = app.get_webview_window("popover") {
+        let _ = popover.hide();
+    }
+
     if let Some(window) = app.get_webview_window("main") {
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
-
-        if let Some(popover) = app.get_webview_window("popover") {
-            let _ = popover.hide();
-        }
     }
     Ok(())
 }
@@ -199,6 +209,21 @@ async fn get_server_info(info: tauri::State<'_, ServerInfo>) -> Result<ServerInf
     })
 }
 
+// ── NSPanel definition for macOS popover ────────────────────────────
+#[cfg(target_os = "macos")]
+tauri_panel! {
+    panel!(PopoverPanel {
+        config: {
+            can_become_key_window: true,
+            is_floating_panel: true
+        }
+    })
+
+    panel_event!(PopoverEventHandler {
+        window_did_resign_key(notification: &NSNotification) -> ()
+    })
+}
+
 // ── App entry point ─────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -210,7 +235,14 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_notification::init());
+
+    // macOS: NSPanel plugin for popover (must appear above fullscreen apps)
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+
+    #[cfg(not(mobile))]
+    let builder = builder
         .setup(|app| {
             // ── WebSocket server ────────────────────────────────
             let token = auth::generate_token();
@@ -247,22 +279,120 @@ pub fn run() {
             // ── Polling loop ────────────────────────────────────
             start_polling(app.handle().clone(), sessions_tx, notifications_tx);
 
+            // ── Popover panel: convert NSWindow to NSPanel for fullscreen support ──
+            // NSPanel can appear above fullscreen apps, unlike regular NSWindow.
+            #[cfg(target_os = "macos")]
+            if let Some(popover) = app.get_webview_window("popover") {
+                let panel = popover.to_panel::<PopoverPanel>().unwrap();
+
+                // Status level (25) = same as macOS menu bar
+                panel.set_level(PanelLevel::Status.value());
+
+                // NonactivatingPanel: won't steal focus from the fullscreen app
+                panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
+
+                // Allow in all Spaces including fullscreen
+                panel.set_collection_behavior(
+                    CollectionBehavior::new()
+                        .full_screen_auxiliary()
+                        .can_join_all_spaces()
+                        .stationary()
+                        .into(),
+                );
+
+                // Don't hide when app is deactivated (when fullscreen app is active)
+                panel.set_hides_on_deactivate(false);
+
+                // Rounded corners at the native window level
+                panel.set_corner_radius(10.0);
+
+                // Click-outside dismiss: hide panel when it loses key window status
+                let handler = PopoverEventHandler::new();
+                let handle = app.handle().clone();
+                handler.window_did_resign_key(move |_notification| {
+                    if let Ok(p) = handle.get_webview_panel("popover") {
+                        p.hide();
+                    }
+                });
+                panel.set_event_handler(Some(handler.as_ref()));
+
+                eprintln!("[c9watch] Popover converted to NSPanel with fullscreen support");
+            }
+
             // ── Tray icon ───────────────────────────────────────
             let app_handle = app.handle().clone();
             TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tauri::include_image!("icons/tray-icon.png"))
                 .icon_as_template(true)
                 .tooltip("c9watch")
                 .on_tray_icon_event(move |_tray, event| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
                         button_state: MouseButtonState::Up,
+                        rect,
                         ..
                     } = event
                     {
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                        // Use NSPanel via tauri-nspanel on macOS for fullscreen support
+                        #[cfg(target_os = "macos")]
+                        {
+                            if let Ok(panel) = app_handle.get_webview_panel("popover") {
+                                if panel.is_visible() {
+                                    panel.hide();
+                                } else {
+                                    // Position below the tray icon, centered horizontally
+                                    if let Some(popover) = app_handle.get_webview_window("popover")
+                                    {
+                                        let scale = popover
+                                            .current_monitor()
+                                            .ok()
+                                            .flatten()
+                                            .map(|m| m.scale_factor())
+                                            .unwrap_or(1.0);
+
+                                        let pos = rect.position.to_physical::<f64>(scale);
+                                        let size = rect.size.to_physical::<f64>(scale);
+
+                                        // Align panel left edge with tray icon left edge
+                                        let x = pos.x;
+                                        let y = pos.y + size.height + 4.0;
+
+                                        let _ = popover.set_position(PhysicalPosition::new(
+                                            x.round() as i32,
+                                            y.round() as i32,
+                                        ));
+                                    }
+                                    panel.show_and_make_key();
+                                }
+                            }
+                        }
+
+                        // Non-macOS: use regular window
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            if let Some(popover) = app_handle.get_webview_window("popover") {
+                                if popover.is_visible().unwrap_or(false) {
+                                    let _ = popover.hide();
+                                } else {
+                                    let pos = rect.position.to_physical::<f64>(1.0);
+                                    let size = rect.size.to_physical::<f64>(1.0);
+                                    let popover_physical_width = popover
+                                        .outer_size()
+                                        .map(|s| s.width as f64)
+                                        .unwrap_or(320.0);
+
+                                    let x =
+                                        pos.x + (size.width / 2.0) - (popover_physical_width / 2.0);
+                                    let y = pos.y + size.height + 4.0;
+
+                                    let _ = popover.set_position(PhysicalPosition::new(
+                                        x.round() as i32,
+                                        y.round() as i32,
+                                    ));
+                                    let _ = popover.show();
+                                    let _ = popover.set_focus();
+                                }
+                            }
                         }
                     }
                 })
@@ -287,6 +417,14 @@ pub fn run() {
     let builder = builder.setup(|_app| Ok(()));
 
     builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // Prevent the app from exiting when all windows are closed.
+            // This is essential for tray/menu bar apps — the app stays alive
+            // in the background with the tray icon even when no windows are visible.
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                api.prevent_exit();
+            }
+        });
 }

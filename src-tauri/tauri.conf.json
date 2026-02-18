@@ -21,6 +21,21 @@
         "visible": true,
         "center": true,
         "titleBarStyle": "Transparent"
+      },
+      {
+        "label": "popover",
+        "title": "c9watch",
+        "url": "/popover",
+        "width": 320,
+        "height": 400,
+        "visible": false,
+        "center": false,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false
       }
     ],
     "security": {

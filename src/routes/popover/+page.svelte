@@ -11,14 +11,41 @@
 
 	let sessions = $derived($sortedSessions);
 	let summary = $derived($statusSummary);
+	let totalSessions = $derived(sessions.length);
 
-	// Initialize data for this window context
-	let unlistenFocus: (() => void) | null = null;
+	// Pixel grid state
+	let trackWidth = $state(0);
+	let columns = $derived(Math.max(1, Math.floor((trackWidth - 6) / 10)));
+	let statusArray = $derived.by(() => {
+		const total = totalSessions;
+		if (total === 0) return Array(columns).fill('empty');
+		const counts = [summary.working, summary.permission, summary.input];
+		const percentages = counts.map((c) => (c / total) * columns);
+		const integerParts = percentages.map((p) => Math.floor(p));
+		const remainders = percentages.map((p, i) => p - integerParts[i]);
+		let allocated = integerParts.reduce((a, b) => a + b, 0);
+		const result = [...integerParts];
+		while (allocated < columns) {
+			let maxIdx = remainders.indexOf(Math.max(...remainders));
+			if (maxIdx === -1) break;
+			result[maxIdx]++;
+			remainders[maxIdx] = -1;
+			allocated++;
+		}
+		const arr: string[] = [];
+		for (let i = 0; i < result[0]; i++) arr.push('working');
+		for (let i = 0; i < result[1]; i++) arr.push('permission');
+		for (let i = 0; i < result[2]; i++) arr.push('input');
+		while (arr.length < columns) arr.push('empty');
+		return arr;
+	});
 
 	onMount(() => {
+		let unlistenFocus: (() => void) | null = null;
+		let cancelled = false;
+
 		const init = async () => {
 			const demoActive = loadDemoDataIfActive();
-
 			await initializeSessionListeners();
 
 			if (!demoActive) {
@@ -30,9 +57,14 @@
 				}
 			}
 
-			// Refresh when window becomes visible (skip in demo mode)
-			unlistenFocus = await listen('tauri://focus', async () => {
-				if (get(isDemoMode)) return;
+			const ul1 = await listen('tauri://focus', async () => {
+				// Re-sync demo mode state on every focus — user may have toggled it
+				// in the main window since the last time this panel was shown.
+				const demo = loadDemoDataIfActive();
+				if (demo) return;
+
+				// Demo is off — ensure isDemoMode store is cleared and fetch real sessions
+				isDemoMode.set(false);
 				try {
 					const freshSessions = await getSessions();
 					sessionsStore.set(freshSessions);
@@ -40,24 +72,34 @@
 					console.error('Failed to refresh sessions:', error);
 				}
 			});
+
+			if (cancelled) {
+				ul1();
+			} else {
+				unlistenFocus = ul1;
+			}
 		};
 
 		init();
 
 		return () => {
+			cancelled = true;
 			if (unlistenFocus) unlistenFocus();
 		};
 	});
 
-	// Get top priority sessions (max 5)
-	let prioritySessions = $derived(
-		sessions
-			.filter(s =>
-				s.status === SessionStatus.NeedsPermission ||
-				s.status === SessionStatus.WaitingForInput
-			)
-			.slice(0, 5)
-	);
+	function getStatusColor(status: SessionStatus): string {
+		switch (status) {
+			case SessionStatus.NeedsPermission:
+				return 'var(--status-permission)';
+			case SessionStatus.WaitingForInput:
+				return 'var(--status-input)';
+			case SessionStatus.Working:
+				return 'var(--status-working)';
+			default:
+				return 'var(--status-connecting)';
+		}
+	}
 
 	async function handleOpen(session: Session) {
 		try {
@@ -74,105 +116,56 @@
 			console.error('Failed to open main window:', error);
 		}
 	}
-
-	function getStatusColor(status: SessionStatus): string {
-		switch (status) {
-			case SessionStatus.NeedsPermission:
-				return 'var(--status-permission)';
-			case SessionStatus.WaitingForInput:
-				return 'var(--status-input)';
-			case SessionStatus.Working:
-				return 'var(--status-working)';
-			default:
-				return 'var(--status-working)';
-		}
-	}
-
-	function getStatusLabel(status: SessionStatus): string {
-		switch (status) {
-			case SessionStatus.NeedsPermission:
-				return 'Permission';
-			case SessionStatus.WaitingForInput:
-				return 'Idle';
-			case SessionStatus.Working:
-				return 'Working';
-			default:
-				return 'Working';
-		}
-	}
 </script>
 
 <div class="popover">
 	<header class="popover-header">
-		<div class="header-title">Claude Sessions</div>
-		<div class="header-summary">
-			{#if summary.permission > 0}
-				<span class="badge permission">{summary.permission}</span>
-			{/if}
-			{#if summary.input > 0}
-				<span class="badge idle">{summary.input}</span>
-			{/if}
-			{#if summary.working > 0}
-				<span class="badge working">{summary.working}</span>
-			{/if}
-		</div>
-	</header>
-
-	<main class="popover-content">
-		{#if sessions.length === 0}
-			<div class="empty-state">
-				<div class="empty-icon">
-					<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-						<circle cx="12" cy="12" r="10" />
-						<path d="M12 6v6l4 2" />
-					</svg>
-				</div>
-				<p>No active sessions</p>
-			</div>
-		{:else if prioritySessions.length > 0}
-			<div class="session-list">
-				{#each prioritySessions as session (session.id)}
-					<div class="session-item" style="--status-color: {getStatusColor(session.status)}">
-						<div class="session-info">
-							<div class="session-project">{session.sessionName}</div>
-							<div class="session-prompt">{session.firstPrompt}</div>
-							<div class="session-meta">
-								<span class="status-badge">{getStatusLabel(session.status)}</span>
-								{#if session.gitBranch}
-									<span class="branch">{session.gitBranch}</span>
-								{/if}
-							</div>
-						</div>
-						<div class="session-actions">
-							<button class="action-btn open" onclick={() => handleOpen(session)} title="Open">
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-									<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-									<polyline points="15 3 21 3 21 9" />
-									<line x1="10" y1="14" x2="21" y2="3" />
-								</svg>
-							</button>
-						</div>
-					</div>
-				{/each}
-			</div>
-		{:else}
-			<div class="all-working">
-				<div class="working-indicator"></div>
-				<p>{summary.working} session{summary.working !== 1 ? 's' : ''} working</p>
-			</div>
-		{/if}
-	</main>
-
-	<footer class="popover-footer">
-		<button class="open-app-btn" onclick={openMainWindow}>
+		<span class="total-count">{totalSessions} session{totalSessions !== 1 ? 's' : ''}</span>
+		<button class="dashboard-btn" onclick={openMainWindow}>
 			Open Dashboard
-			<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+			<svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 				<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
 				<polyline points="15 3 21 3 21 9" />
 				<line x1="10" y1="14" x2="21" y2="3" />
 			</svg>
 		</button>
-	</footer>
+	</header>
+
+	<div class="pixel-grid" class:empty={totalSessions === 0} bind:clientWidth={trackWidth}>
+		<div class="grid-inner" style="grid-template-columns: repeat({columns}, 1fr);">
+			{#each statusArray as status}
+				<div class="block {status}"></div>
+			{/each}
+		</div>
+	</div>
+
+	<main class="popover-content">
+		{#if sessions.length === 0}
+			<div class="empty-state">
+				<p>No active sessions</p>
+			</div>
+		{:else}
+			<div class="session-list">
+				{#each sessions as session (session.id)}
+					<button class="session-card" onclick={() => handleOpen(session)}>
+						<div class="card-top">
+							<span class="session-dot" style="background: {getStatusColor(session.status)}"></span>
+							<span class="session-project">{session.sessionName}</span>
+							<svg aria-hidden="true" class="open-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+								<polyline points="15 3 21 3 21 9" />
+								<line x1="10" y1="14" x2="21" y2="3" />
+							</svg>
+						</div>
+						<div class="card-title">{session.customTitle || session.firstPrompt}</div>
+						{#if session.latestMessage}
+							<div class="card-latest">{session.latestMessage}</div>
+						{/if}
+					</button>
+				{/each}
+			</div>
+		{/if}
+	</main>
 </div>
 
 <style>
@@ -182,216 +175,183 @@
 		height: 100vh;
 		background: var(--bg-base);
 		border: 1px solid var(--border-default);
-		border-radius: 8px;
+		border-radius: 10px;
 		overflow: hidden;
 		font-family: var(--font-mono);
+		user-select: none;
+		-webkit-user-select: none;
 	}
 
 	.popover-header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: var(--space-md) var(--space-lg);
-		border-bottom: 1px solid var(--border-default);
-		background: var(--bg-elevated);
+		padding: 10px 16px;
+		flex-shrink: 0;
 	}
 
-	.header-title {
-		font-family: var(--font-pixel);
+	.total-count {
 		font-size: 11px;
-		font-weight: 500;
-		color: var(--text-primary);
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-	}
-
-	.header-summary {
-		display: flex;
-		gap: var(--space-xs);
-	}
-
-	.badge {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		min-width: 18px;
-		height: 18px;
-		padding: 0 var(--space-xs);
-		border-radius: 9px;
-		font-size: 10px;
-		font-weight: 600;
-		color: var(--bg-base);
-	}
-
-	.badge.permission {
-		background: var(--status-permission);
-	}
-
-	.badge.idle {
-		background: var(--status-input);
-	}
-
-	.badge.working {
-		background: var(--status-working);
-	}
-
-	.popover-content {
-		flex: 1;
-		overflow-y: auto;
-		padding: var(--space-sm);
-	}
-
-	.empty-state,
-	.all-working {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		height: 100%;
-		gap: var(--space-md);
 		color: var(--text-muted);
 	}
 
-	.empty-icon {
-		opacity: 0.5;
-	}
-
-	.empty-state p,
-	.all-working p {
-		font-size: 11px;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-
-	.working-indicator {
-		width: 12px;
-		height: 12px;
-		background: var(--status-working);
-		border-radius: 50%;
-		animation: pulse 1.5s ease-in-out infinite;
-	}
-
-	@keyframes pulse {
-		0%, 100% { opacity: 1; transform: scale(1); }
-		50% { opacity: 0.6; transform: scale(0.9); }
-	}
-
-	.session-list {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-xs);
-	}
-
-	.session-item {
+	.dashboard-btn {
 		display: flex;
 		align-items: center;
-		gap: var(--space-md);
-		padding: var(--space-sm) var(--space-md);
-		background: var(--bg-elevated);
-		border: 1px solid var(--border-default);
-		border-left: 3px solid var(--status-color);
-		border-radius: 4px;
-		transition: background 0.15s ease;
-	}
-
-	.session-item:hover {
-		background: var(--bg-hover);
-	}
-
-	.session-info {
-		flex: 1;
-		min-width: 0;
-	}
-
-	.session-project {
-		font-size: 11px;
-		font-weight: 600;
-		color: var(--text-primary);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
-	.session-prompt {
-		font-size: 10px;
-		color: var(--text-secondary);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		margin-top: 2px;
-	}
-
-	.session-meta {
-		display: flex;
-		align-items: center;
-		gap: var(--space-sm);
-		margin-top: var(--space-xs);
-	}
-
-	.status-badge {
-		font-size: 9px;
-		color: var(--status-color);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-
-	.branch {
-		font-size: 9px;
+		gap: 5px;
+		padding: 4px 0;
+		border: none;
+		background: transparent;
 		color: var(--text-muted);
-	}
-
-	.session-actions {
-		display: flex;
-		gap: var(--space-xs);
-	}
-
-	.action-btn {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 28px;
-		height: 28px;
-		border: 1px solid var(--border-default);
-		border-radius: 4px;
-		background: transparent;
-		color: var(--text-secondary);
-		cursor: pointer;
-		transition: all 0.15s ease;
-	}
-
-	.action-btn:hover {
-		background: var(--bg-hover);
-		color: var(--text-primary);
-	}
-
-	.popover-footer {
-		padding: var(--space-sm) var(--space-lg);
-		border-top: 1px solid var(--border-default);
-		background: var(--bg-elevated);
-	}
-
-	.open-app-btn {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: var(--space-sm);
-		width: 100%;
-		padding: var(--space-sm) var(--space-md);
-		border: 1px solid var(--border-default);
-		border-radius: 4px;
-		background: transparent;
-		color: var(--text-secondary);
 		font-family: var(--font-mono);
 		font-size: 10px;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 		cursor: pointer;
-		transition: all 0.15s ease;
+		transition: color var(--transition-fast);
 	}
 
-	.open-app-btn:hover {
-		background: var(--bg-hover);
+	.dashboard-btn:hover {
 		color: var(--text-primary);
-		border-color: var(--text-muted);
 	}
+
+	.dashboard-btn:focus-visible {
+		outline: none;
+	}
+
+	.pixel-grid {
+		height: 16px;
+		background: var(--bg-elevated);
+		border-top: 1px solid var(--border-muted);
+		border-bottom: 1px solid var(--border-muted);
+		padding: 3px 16px;
+		flex-shrink: 0;
+	}
+
+	.pixel-grid.empty {
+		opacity: 0.4;
+	}
+
+	.grid-inner {
+		display: grid;
+		grid-template-rows: 1fr;
+		gap: 2px;
+		height: 100%;
+	}
+
+	.block {
+		background: rgba(255, 255, 255, 0.06);
+		border-radius: 1px;
+		transition: background-color var(--transition-normal);
+	}
+
+	.block.working   { background-color: var(--status-working);    box-shadow: 0 0 3px var(--status-working-glow); }
+	.block.permission { background-color: var(--status-permission); box-shadow: 0 0 3px var(--status-permission-glow); }
+	.block.input     { background-color: var(--status-input);       box-shadow: 0 0 3px var(--status-input-glow); }
+
+	.popover-content {
+		flex: 1;
+		overflow-y: auto;
+	}
+
+	.empty-state {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		height: 100%;
+		color: var(--text-muted);
+		font-size: 11px;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.empty-state p {
+		margin: 0;
+	}
+
+	.session-list {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.session-card {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+		padding: 9px 16px;
+		border: none;
+		border-bottom: 1px solid var(--border-muted);
+		background: transparent;
+		color: var(--text-primary);
+		font-family: var(--font-mono);
+		cursor: pointer;
+		transition: background var(--transition-fast);
+		text-align: left;
+		width: 100%;
+	}
+
+	.session-card:last-child {
+		border-bottom: none;
+	}
+
+	.session-card:hover {
+		background: var(--bg-elevated);
+	}
+
+	.session-card:focus-visible {
+		outline: none;
+	}
+
+	.card-top {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.session-dot {
+		width: 6px;
+		height: 6px;
+		border-radius: 0;
+		flex-shrink: 0;
+	}
+
+	.session-project {
+		flex: 1;
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--text-primary);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.open-icon {
+		flex-shrink: 0;
+		opacity: 0;
+		color: var(--text-muted);
+		transition: opacity var(--transition-fast);
+	}
+
+	.session-card:hover .open-icon {
+		opacity: 1;
+	}
+
+	.card-title {
+		font-size: 11px;
+		color: var(--text-secondary);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		padding-left: 14px;
+	}
+
+	.card-latest {
+		font-size: 10px;
+		color: var(--text-muted);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		padding-left: 14px;
+	}
+
 </style>
