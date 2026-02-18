@@ -171,11 +171,10 @@ async fn get_terminal_title(pid: u32) -> Result<Option<String>, String> {
 #[cfg(not(mobile))]
 #[tauri::command]
 async fn show_main_window(app: AppHandle) -> Result<(), String> {
-    // Hide popover first (before showing main window to avoid race)
-    #[cfg(target_os = "macos")]
-    if let Ok(panel) = app.get_webview_panel("popover") {
-        panel.hide();
-    }
+    // On macOS the popover panel auto-hides via window_did_resign_key
+    // when the main window takes focus. No need to explicitly hide it here.
+    // (Calling panel.hide() here would deadlock the panel manager mutex
+    // because resign_key fires synchronously and also calls get_webview_panel.)
     #[cfg(not(target_os = "macos"))]
     if let Some(popover) = app.get_webview_window("popover") {
         let _ = popover.hide();
