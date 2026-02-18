@@ -24,7 +24,7 @@ use std::time::Duration;
 #[cfg(not(mobile))]
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter,
+    Emitter, PhysicalPosition,
 };
 use tauri::{AppHandle, Manager};
 
@@ -250,19 +250,32 @@ pub fn run() {
             // ── Tray icon ───────────────────────────────────────
             let app_handle = app.handle().clone();
             TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tauri::include_image!("icons/tray-icon.png"))
                 .icon_as_template(true)
                 .tooltip("c9watch")
                 .on_tray_icon_event(move |_tray, event| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
                         button_state: MouseButtonState::Up,
+                        rect,
                         ..
                     } = event
                     {
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                        if let Some(popover) = app_handle.get_webview_window("popover") {
+                            if popover.is_visible().unwrap_or(false) {
+                                let _ = popover.hide();
+                            } else {
+                                let pos = rect.position.to_physical::<f64>(1.0);
+                                let size = rect.size.to_physical::<f64>(1.0);
+                                let popover_width = 320.0_f64;
+
+                                let x = pos.x + (size.width / 2.0) - (popover_width / 2.0);
+                                let y = pos.y + size.height + 4.0;
+
+                                let _ = popover.set_position(PhysicalPosition::new(x as i32, y as i32));
+                                let _ = popover.show();
+                                let _ = popover.set_focus();
+                            }
                         }
                     }
                 })
