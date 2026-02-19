@@ -64,6 +64,11 @@ async fn get_sessions() -> Result<Vec<Session>, String> {
 /// Core logic for getting conversation data (shared by Tauri command and WS handler)
 #[cfg(not(mobile))]
 pub fn get_conversation_data(session_id: &str) -> Result<Conversation, String> {
+    // SECURITY: Validate session_id to prevent path traversal
+    if session_id.chars().any(|c| !c.is_ascii_alphanumeric() && c != '-') {
+        return Err("Invalid session ID format".to_string());
+    }
+
     let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
     let claude_projects_dir = home_dir.join(".claude").join("projects");
 
