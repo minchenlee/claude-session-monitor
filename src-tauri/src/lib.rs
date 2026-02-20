@@ -61,9 +61,31 @@ async fn get_sessions() -> Result<Vec<Session>, String> {
     polling::detect_and_enrich_sessions()
 }
 
+/// Validates a session ID to ensure it contains only allowed characters.
+/// This prevents path traversal attacks by rejecting IDs with ".." or "/".
+pub fn validate_session_id(session_id: &str) -> Result<(), String> {
+    if session_id.is_empty() {
+        return Err("Session ID cannot be empty".to_string());
+    }
+
+    if !session_id
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(
+            "Invalid session ID format: must contain only alphanumeric characters, '-', and '_'"
+                .to_string(),
+        );
+    }
+
+    Ok(())
+}
+
 /// Core logic for getting conversation data (shared by Tauri command and WS handler)
 #[cfg(not(mobile))]
 pub fn get_conversation_data(session_id: &str) -> Result<Conversation, String> {
+    validate_session_id(session_id)?;
+
     let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
     let claude_projects_dir = home_dir.join(".claude").join("projects");
 
@@ -138,6 +160,8 @@ async fn rename_session(
     session_id: String,
     new_name: String,
 ) -> Result<(), String> {
+    validate_session_id(&session_id)?;
+
     let mut custom_titles = session::CustomTitles::load();
     custom_titles.set(session_id, new_name);
     custom_titles.save()?;
@@ -289,4 +313,28 @@ pub fn run() {
     builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_session_id_valid() {
+        assert!(validate_session_id("valid-id").is_ok());
+        assert!(validate_session_id("valid_id_123").is_ok());
+        assert!(validate_session_id("123456").is_ok());
+        assert!(validate_session_id("uuid-v4-format-ok").is_ok());
+    }
+
+    #[test]
+    fn test_validate_session_id_invalid() {
+        assert!(validate_session_id("").is_err());
+        assert!(validate_session_id("../invalid").is_err());
+        assert!(validate_session_id("invalid/id").is_err());
+        assert!(validate_session_id("invalid\\id").is_err());
+        assert!(validate_session_id("invalid id").is_err());
+        assert!(validate_session_id("invalid!id").is_err());
+        assert!(validate_session_id("..").is_err());
+    }
 }

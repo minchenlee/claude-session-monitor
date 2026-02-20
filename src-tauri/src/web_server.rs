@@ -277,6 +277,10 @@ async fn handle_message(msg: ClientMsg) -> ServerMsg {
             session_id,
             new_name,
         } => {
+            if let Err(e) = crate::validate_session_id(&session_id) {
+                return ServerMsg::Error { message: e };
+            }
+
             let mut custom_titles = crate::session::CustomTitles::load();
             custom_titles.set(session_id, new_name);
             match custom_titles.save() {
