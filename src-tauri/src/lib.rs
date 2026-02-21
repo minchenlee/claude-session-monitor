@@ -28,6 +28,27 @@ use tauri::{
 };
 use tauri::{AppHandle, Manager};
 
+// ── Security & Validation ───────────────────────────────────────────
+
+/// Validate a session ID to prevent path traversal and ensure format compliance
+///
+/// Allowed characters: alphanumeric, hyphen (-), underscore (_)
+/// Maximum length: 255 characters
+pub fn validate_session_id(session_id: &str) -> Result<(), String> {
+    if session_id.is_empty() {
+        return Err("Session ID cannot be empty".to_string());
+    }
+    if session_id.len() > 255 {
+        return Err("Session ID is too long".to_string());
+    }
+    for c in session_id.chars() {
+        if !c.is_alphanumeric() && c != '-' && c != '_' {
+            return Err(format!("Invalid character in session ID: '{}'", c));
+        }
+    }
+    Ok(())
+}
+
 // ── Shared types ────────────────────────────────────────────────────
 
 /// Conversation structure for the frontend
@@ -64,6 +85,8 @@ async fn get_sessions() -> Result<Vec<Session>, String> {
 /// Core logic for getting conversation data (shared by Tauri command and WS handler)
 #[cfg(not(mobile))]
 pub fn get_conversation_data(session_id: &str) -> Result<Conversation, String> {
+    validate_session_id(session_id)?;
+
     let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
     let claude_projects_dir = home_dir.join(".claude").join("projects");
 
@@ -138,6 +161,8 @@ async fn rename_session(
     session_id: String,
     new_name: String,
 ) -> Result<(), String> {
+    validate_session_id(&session_id)?;
+
     let mut custom_titles = session::CustomTitles::load();
     custom_titles.set(session_id, new_name);
     custom_titles.save()?;
@@ -289,4 +314,35 @@ pub fn run() {
     builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_session_id() {
+        // Valid cases
+        assert!(validate_session_id("session-123").is_ok());
+        assert!(validate_session_id("abc_def-123").is_ok());
+        assert!(validate_session_id("123456").is_ok());
+
+        // Invalid cases - Path Traversal
+        assert!(validate_session_id("../foo").is_err());
+        assert!(validate_session_id("/etc/passwd").is_err());
+        assert!(validate_session_id("foo/bar").is_err());
+        assert!(validate_session_id("..\\foo").is_err());
+
+        // Invalid cases - Special chars
+        assert!(validate_session_id("foo.bar").is_err());
+        assert!(validate_session_id("foo bar").is_err());
+        assert!(validate_session_id("foo$bar").is_err());
+
+        // Empty
+        assert!(validate_session_id("").is_err());
+
+        // Too long
+        let long_id = "a".repeat(256);
+        assert!(validate_session_id(&long_id).is_err());
+    }
 }
