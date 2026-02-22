@@ -30,6 +30,23 @@ use tauri::{AppHandle, Manager};
 
 // ── Shared types ────────────────────────────────────────────────────
 
+/// Validates session ID to prevent Path Traversal and invalid inputs.
+/// Allowed: Alphanumeric, hyphen, underscore.
+pub fn validate_session_id(session_id: &str) -> Result<(), String> {
+    if session_id.is_empty() {
+        return Err("Session ID cannot be empty".to_string());
+    }
+    if session_id.len() > 255 {
+        return Err("Session ID is too long".to_string());
+    }
+    for c in session_id.chars() {
+        if !c.is_alphanumeric() && c != '-' && c != '_' {
+            return Err(format!("Invalid character in session ID: '{}'", c));
+        }
+    }
+    Ok(())
+}
+
 /// Conversation structure for the frontend
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +81,8 @@ async fn get_sessions() -> Result<Vec<Session>, String> {
 /// Core logic for getting conversation data (shared by Tauri command and WS handler)
 #[cfg(not(mobile))]
 pub fn get_conversation_data(session_id: &str) -> Result<Conversation, String> {
+    validate_session_id(session_id)?;
+
     let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
     let claude_projects_dir = home_dir.join(".claude").join("projects");
 
@@ -138,6 +157,8 @@ async fn rename_session(
     session_id: String,
     new_name: String,
 ) -> Result<(), String> {
+    validate_session_id(&session_id)?;
+
     let mut custom_titles = session::CustomTitles::load();
     custom_titles.set(session_id, new_name);
     custom_titles.save()?;
